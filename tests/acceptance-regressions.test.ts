@@ -24,6 +24,15 @@ describe('acceptance failure regressions',()=>{
  const candidates=matchProducts({supplier:'GANADEROS PRODUCTORES DE LECHE PURA S.A.P.I DE C.V',supplierSku:'00002',barcode:null,description:'Crema 250g'},[product({name:'Leche 1L'}),product({id:'002',supplier:'Other dairy',supplierSku:'00002'})]);
  expect(candidates[0].flags).toContain('Proveedor de catálogo distinto; requiere verificar');
  });
+ it('keeps unresolved supplier-key versions pending even with a compatible description and a check',()=>{
+ const raw=ExtractionSchema.parse({supplier:'Alpura',reference:'SYNTHETIC',date:null,currency:null,printedPage:null,printedPageCount:null,printedTotal:null,warnings:[],rows:[{sourcePage:1,sourceRow:1,supplierSku:'00002',barcode:null,description:'Crema 250g',quantity:3,unit:'PZ',packContents:null,price:null,discount:null,tax:null,amount:null,rawText:'00002 Crema 250g 3 PZ',receptionMarked:true,flags:[]}]});
+ const [row]=buildInvoiceRows(raw,[product()]);
+ expect(row.flags).toContain('Clave de proveedor distinta; equivalencia sin verificar');expect(row.confirmed).toBe(false);expect(row.supplierSku).toBe('00002');expect(row.product?.supplierSku).toBe('00001');
+ const exact=buildInvoiceRows({...raw,rows:[{...raw.rows[0],supplierSku:'00001'}]},[product()])[0];expect(exact.flags).toEqual([]);expect(exact.confirmedQuantity).toBe(3);
+ const internal=[{id:'internal',external_id:'001'}],mappings=[{supplier:'Alpura',supplier_sku:'00002',product_id:'internal'}];
+ const mapped=buildInvoiceRows(raw,[product()],internal,mappings)[0];expect(mapped.flags).toEqual([]);expect(mapped.evidence).toContain('Mapeo confirmado anteriormente');
+ const conflict=buildInvoiceRows({...raw,rows:[{...raw.rows[0],description:'Crema rica 250g'}]},[product({name:'Crema rica 210g'})],internal,mappings)[0];expect(conflict.flags).toContain('Presentación o contenido distinto');expect(conflict.confirmed).toBe(false);
+ });
  it('retains only output text and stop reason as private failure evidence and never parses a truncated result',()=>{
  const response={stop_reason:'max_tokens' as const,content:[{type:'text' as const,text:'{"rows":[',citations:null},{type:'thinking' as const,thinking:'private reasoning',signature:'private signature'}]};
  expect(invoiceOutputEvidence(response)).toEqual({stopReason:'max_tokens',textBlocks:['{"rows":[']});expect(()=>readInvoiceOutput(response)).toThrow();

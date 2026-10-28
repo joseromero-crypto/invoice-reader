@@ -6,6 +6,7 @@ export function supplierIdentity(supplier:string){
  return ({'comercializadora de lacteos y derivados':'lala','hygeia de mexico':'hygeia','ganaderos productores de leche pura':'alpura','distribuidora arca continental':'arca continental','sigma alimentos comercial':'sigma ecommerce','qualtia alimentos operaciones':'qualtia','mission foods mexico':'mission foods'} as Record<string,string>)[legal]??legal;
 }
 export const supplierKey=(supplier:string,sku:string)=>supplierIdentity(supplier)+'|'+(supplierIdentity(supplier)==='lala'&&/^\d+$/.test(sku)?sku.replace(/^0+(?=\d)/,''):sku.trim());
+export const unverifiedSupplierKeyFlag='Clave de proveedor distinta; equivalencia sin verificar';
 const size=(s:string)=>[...normalize(s).matchAll(/(\d+(?:\.\d+)?)\s*(kg|ml|gr|g|lt|l)(?=\b|\d|nc\b)/g)].map(m=>`${Number(m[1])*(['kg','l','lt'].includes(m[2])?1000:1)}${['kg','gr','g'].includes(m[2])?'g':'ml'}`);
 const flavors=['limon','jamaica','fresa','vainilla','chocolate','integral','multigrano','blanco','dragon','durazno','mango','pavo','cerdo','almendra','coco','nuez'];
 export function matchProducts(input:{supplier:string;supplierSku:string|null;barcode:string|null;description:string},products:Product[]):Candidate[]{
@@ -19,6 +20,8 @@ export function matchProducts(input:{supplier:string;supplierSku:string|null;bar
  if(tokens.length>=2&&overlap>=0.65){evidence.push('Descripción compatible');score+=overlap*4;}
  if(!evidence.length)continue;
  if(knownSupplier&&supplierIdentity(product.supplier)!==supplierIdentity(input.supplier))flags.push('Proveedor de catálogo distinto; requiere verificar');
+ // A description alone cannot establish that two different supplier keys are equivalent.
+ if(input.supplierSku&&product.supplierSku&&supplierIdentity(product.supplier)===supplierIdentity(input.supplier)&&supplierKey(input.supplier,input.supplierSku)!==supplierKey(product.supplier,product.supplierSku)&&!evidence.includes('Código de barras exacto'))flags.push(unverifiedSupplierKeyFlag);
  const a=size(input.description),b=size(product.name);
  if(a.length&&b.length&&!a.some(x=>b.includes(x)))flags.push('Presentación o contenido distinto');
  const fa=flavors.filter(f=>text.includes(f)),fb=flavors.filter(f=>name.includes(f));

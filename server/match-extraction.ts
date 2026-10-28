@@ -1,14 +1,14 @@
 import {randomUUID} from 'node:crypto';
 import {convertQuantity,confirmRow,type Row,type Product,type ExtractionSchema} from '../shared/domain.ts';
 import type {z} from 'zod';
-import {matchProducts,supplierIdentity} from '../shared/matching.ts';
+import {matchProducts,supplierIdentity,unverifiedSupplierKeyFlag} from '../shared/matching.ts';
 import {hasReceptionMark,itemFlags} from '../shared/receiving-policy.ts';
 type Extraction=z.infer<typeof ExtractionSchema>;
 export function buildInvoiceRows(extraction:Extraction,products:Product[],internalProducts:any[]=[],mappings:any[]=[],rules:any[]=[]){
  return extraction.rows.map(source=>{
  const candidates=matchProducts({supplier:extraction.supplier??'',supplierSku:source.supplierSku,barcode:source.barcode,description:source.description},products);
  const mapping=mappings.find(m=>supplierIdentity(m.supplier)===supplierIdentity(extraction.supplier??'')&&m.supplier_sku===source.supplierSku);
- if(mapping){const mapped=internalProducts.find(p=>p.id===mapping.product_id);const candidate=mapped&&candidates.find(c=>c.product.id===mapped.external_id);if(candidate){candidate.evidence.push('Mapeo confirmado anteriormente');candidate.score+=4;candidates.sort((a,b)=>b.score-a.score);}}
+ if(mapping){const mapped=internalProducts.find(p=>p.id===mapping.product_id);const candidate=mapped?candidates.find(c=>c.product.id===mapped.external_id):undefined;if(candidate){candidate.flags=candidate.flags.filter(flag=>flag!==unverifiedSupplierKeyFlag);candidate.evidence.push('Mapeo confirmado anteriormente');candidate.score+=4;candidates.sort((a,b)=>b.score-a.score);}}
  const best=candidates[0],internal=internalProducts.find(p=>p.external_id===best?.product.id);
  const rule=rules.find(r=>r.product_id===internal?.id&&supplierIdentity(r.supplier)===supplierIdentity(extraction.supplier??'')&&(r.source_unit??'').toLowerCase()===(source.unit??'').toLowerCase());
  const conversion=convertQuantity(source.quantity,source.unit,best?.product.unit??'unknown',rule?Number(rule.factor):undefined);
