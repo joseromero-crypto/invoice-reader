@@ -21,6 +21,8 @@ Configure the public Supabase URL/publishable key for Build scope; server Supaba
 
 Apply all SQL files in `supabase/migrations` in filename order for a new database. Provision a company and invited users; administrator members see all eight hubs, receivers need explicit hub assignments. RLS protects shared history and private photo/catalog storage. Internal policy helpers live in an unexposed schema; mutations are server-only.
 
+AI reads have no app-imposed daily call cap. Daily counters retain usage accounting; explicit retries, attempt limits and duplicate-job fencing remain enforced.
+
 See [integration and hosted acceptance](docs/INTEGRATION.md) for the complete checklist. A successful build or accepted background dispatch is not proof of a completed extraction.
 
 ## Checks

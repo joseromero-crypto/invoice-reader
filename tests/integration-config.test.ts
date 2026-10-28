@@ -1,4 +1,5 @@
-import {expect,it} from 'vitest';
+import {expect,it,vi} from 'vitest';
+import {limits} from '../server/config';
 import {integrationIssues} from '../server/integration-config';
 const env={VITE_SUPABASE_URL:'https://test.supabase.co',SUPABASE_URL:'https://test.supabase.co',VITE_SUPABASE_PUBLISHABLE_KEY:'sb_publishable_example',SUPABASE_SECRET_KEY:'sb_secret_example',ANTHROPIC_API_KEY:'test-key',ANTHROPIC_MODEL:'chosen-model'};
 it('accepts distinct public/server settings without printing their values',()=>expect(integrationIssues(env)).toEqual([]));
@@ -11,4 +12,9 @@ it('rejects both modern and legacy service credentials in frontend variables',()
 it('rejects missing settings, URL credentials and invalid prices',()=>{
  expect(integrationIssues({})).toHaveLength(6);
  expect(integrationIssues({...env,SUPABASE_URL:'https://user:password@test.supabase.co',AI_INPUT_USD_PER_MILLION:'NaN'})).toHaveLength(3);
+});
+
+it('ignores obsolete daily-limit settings instead of retaining an app call cap',()=>{
+ vi.stubEnv('AI_DAILY_USAGE_LIMIT','0');
+ try{expect(limits()).not.toHaveProperty('dailyCalls');}finally{vi.unstubAllEnvs();}
 });

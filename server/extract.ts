@@ -18,7 +18,7 @@ export async function extractJob(request:Request,jobId:string){
  await requireHub(db,orgId,userId,receiving.hub_id);
  const pages=check(await db.from('source_pages').select('*').eq('document_id',document.id).eq('org_id',orgId).order('page_number'))!;
  const model=process.env.ANTHROPIC_MODEL;if(!model||!process.env.ANTHROPIC_API_KEY)throw new HttpError(503,'Anthropic configuration missing');
- let claimed:any;try{claimed=check(await db.rpc('claim_extraction',{p_job:job.id,p_actor:userId,p_limit:limits().dailyCalls}));}catch(e){await db.from('extraction_jobs').update({status:'failed',error:'Usage reservation rejected. Check daily limit.'}).eq('id',job.id).eq('org_id',orgId).eq('status','queued');throw e;}if(!claimed)return;
+ let claimed:any;try{claimed=check(await db.rpc('claim_extraction',{p_job:job.id,p_actor:userId,p_limit:null}));}catch(e){await db.from('extraction_jobs').update({status:'failed',error:'Extraction reservation rejected.'}).eq('id',job.id).eq('org_id',orgId).eq('status','queued');throw e;}if(!claimed)return;
  const started=Date.now();let paidStarted=false;let stage:ExtractionStage='image_validation';
  let received:{model:string;usage:Anthropic.Message['usage'];output:ReturnType<typeof invoiceOutputEvidence>}|undefined;
  let validated:ReturnType<typeof readInvoiceOutput>|undefined;

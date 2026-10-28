@@ -5,7 +5,7 @@ import {ExtractionSchema} from '../shared/domain';
 // The SDK transforms unsupported schema constraints; Zod still enforces them locally.
 export function invoiceOutputFormat(){return zodOutputFormat(ExtractionSchema);}
 // Dense multi-photo documents need room for both adaptive thinking and the JSON rows.
-// This is an output ceiling, not an additional request or a daily-call limit change.
+// This ceiling limits one response; it is independent of usage accounting.
 export function invoiceRequestOptions(pages:number){return {max_tokens:pages>=3?32000:16000,output_config:{format:invoiceOutputFormat()}};}
 // Failed output stays private in extraction_jobs; never turn partial JSON into receiving rows.
 export function invoiceOutputEvidence(response:Pick<Anthropic.Message,'stop_reason'|'content'>){return {stopReason:response.stop_reason,textBlocks:response.content.filter(block=>block.type==='text').map(block=>block.text)};}
