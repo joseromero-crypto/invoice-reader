@@ -57,3 +57,17 @@ Netlify background functions acknowledge dispatch with HTTP 202 before processin
 6. Resolve a pending product individually; verify its exclusion before confirmation, partial-output acknowledgement, clipboard headers and CSV. Nothing here changes Retool inventory.
 
 Record actual outcomes, deployment URL and limits; do not mark hosted acceptance complete based on local tests.
+
+## Recheck a saved extraction without another model call
+
+`Actualizar coincidencias` on a completed live invoice rebuilds untouched row matches from its stored extraction and the current catalog. It does not upload images, queue extraction, or consume Anthropic calls. Confirmed/edited rows remain intact, and revision checks preserve concurrent edits.
+
+For local development with no server credentials, put a saved extraction JSON in the ignored private fixture root, then run:
+
+```sh
+PRIVATE_REPLAY_FILE=saved-extraction.json npm run dev -- --port 5174 --strictPort
+```
+
+Open the loopback URL, choose a hub and use `Cargar ensayo privado`. This is a labeled replay, not new OCR or a hosted persistence check. The filename must be inside the private root; do not put it in public assets or deploy this development server.
+
+Receiving policy: work with uploaded pages only. Page counts, absent prices, totals, currency, background objects and image angle do not block the item/quantity list. PZ counts the selected catalog item, including multipacks. Clear row checkmarks confirm reception when product and quantity are unambiguous; identity conflicts, unreadable quantities and unverified conversions still require review. Original extracted source text and IDs remain separate from matching/receiving decisions.

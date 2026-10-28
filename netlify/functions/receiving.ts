@@ -4,10 +4,12 @@ import {limits} from '../../server/config';
 import {authorize,check,HttpError,failure} from '../../server/auth';
 import {requireHub,listHubs} from '../../server/hubs';
 import {loadWorkspace} from '../../server/workspace';
+import {rematchDocument} from '../../server/rematch';
 const uuid=z.string().uuid();
 const Input=z.discriminatedUnion('action',[
  z.object({action:z.literal('hubs')}),z.object({action:z.literal('history'),hubId:uuid,before:z.object({at:z.string().datetime({offset:true}),id:uuid}).optional()}),z.object({action:z.literal('create'),hubId:uuid}),z.object({action:z.literal('latest'),hubId:uuid}),z.object({action:z.literal('load'),sessionId:uuid}),
  z.object({action:z.literal('document'),sessionId:uuid}),
+ z.object({action:z.literal('rematch'),sessionId:uuid,documentId:uuid}),
  z.object({action:z.literal('metadata'),sessionId:uuid,documentId:uuid,supplier:z.string().trim().min(1).max(200),invoiceDate:z.string().date().nullable(),revision:z.number().int().nonnegative()}),
  z.object({action:z.literal('confirm-batch'),sessionId:uuid,documentId:uuid,rows:z.array(z.object({rowId:uuid,productId:z.string(),quantity:z.number().int().nonnegative().max(1000000),revision:z.number().int().nonnegative()})).min(1).max(500)}),
  z.object({action:z.literal('page'),sessionId:uuid,documentId:uuid,objectPath:z.string(),hash:z.string().regex(/^[a-f0-9]{64}$/)}),
@@ -36,6 +38,7 @@ export default async function handler(request:Request){
  if(session.status!=='open')throw new HttpError(409,'Receipt is already saved');
  if(b.action==='document'){const document=check(await db.from('documents').insert({org_id:orgId,session_id:b.sessionId}).select('id').single())!;return Response.json({documentId:document.id});}
  const document=check(await db.from('documents').select('*').eq('org_id',orgId).eq('session_id',b.sessionId).eq('id',b.documentId).maybeSingle());if(!document)throw new HttpError(404,'Document not found');
+ if(b.action==='rematch')return Response.json(await rematchDocument(db,orgId,userId,document));
  if(b.action==='metadata'){check(await db.rpc('update_scan_metadata',{p_actor:userId,p_org:orgId,p_document:b.documentId,p_supplier:b.supplier,p_invoice_date:b.invoiceDate,p_expected_revision:b.revision}));return Response.json({ok:true});}
  if(b.action==='confirm-batch'){
  const products=check(await db.from('products').select('id,external_id').eq('org_id',orgId).in('external_id',b.rows.map(r=>r.productId)))!;

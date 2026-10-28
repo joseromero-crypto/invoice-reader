@@ -1,8 +1,13 @@
 import type {Candidate,Product} from './domain.ts';
 export const normalize=(s:string)=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9.]+/g,' ').trim();
-export const supplierKey=(supplier:string,sku:string)=>normalize(supplier)+'|'+(normalize(supplier)==='lala'&&/^\d+$/.test(sku)?sku.replace(/^0+(?=\d)/,''):sku.trim());
-const size=(s:string)=>[...normalize(s).matchAll(/(\d+(?:\.\d+)?)\s*(kg|ml|g|l)\b/g)].map(m=>`${m[1]}${m[2]}`);
-const flavors=['limon','jamaica','fresa','vainilla','chocolate','integral','multigrano','blanco','dragon','durazno','mango','pavo','cerdo'];
+// Verified legal/trading names; raw invoice/catalog values are never rewritten.
+export function supplierIdentity(supplier:string){
+ const legal=normalize(supplier).replace(/\./g,'').replace(/\s+/g,' ').replace(/\s+s\s*a\s+de\s+c\s*v$/, '').trim();
+ return ({'comercializadora de lacteos y derivados':'lala','hygeia de mexico':'hygeia'} as Record<string,string>)[legal]??legal;
+}
+export const supplierKey=(supplier:string,sku:string)=>supplierIdentity(supplier)+'|'+(supplierIdentity(supplier)==='lala'&&/^\d+$/.test(sku)?sku.replace(/^0+(?=\d)/,''):sku.trim());
+const size=(s:string)=>[...normalize(s).matchAll(/(\d+(?:\.\d+)?)\s*(kg|ml|gr|g|lt|l)\b/g)].map(m=>`${Number(m[1])*(['kg','l','lt'].includes(m[2])?1000:1)}${['kg','gr','g'].includes(m[2])?'g':'ml'}`);
+const flavors=['limon','jamaica','fresa','vainilla','chocolate','integral','multigrano','blanco','dragon','durazno','mango','pavo','cerdo','almendra','coco','nuez'];
 export function matchProducts(input:{supplier:string;supplierSku:string|null;barcode:string|null;description:string},products:Product[]):Candidate[]{
  const text=normalize(input.description),tokens=text.split(' ').filter(t=>t.length>1),matches:Candidate[]=[];
  for(const product of products){
