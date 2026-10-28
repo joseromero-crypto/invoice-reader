@@ -11,6 +11,21 @@ describe('uploaded-page receiving policy',()=>{
  expect(row.proposedQuantity).toBe(3);expect(row.confirmedQuantity).toBe(3);expect(row.flags).toEqual([]);expect(row.receptionMarked).toBe(true);expect(JSON.stringify(raw)).toBe(before);
  expect(exportCsv([{id:'d',supplier:'TEST',reference:'TEST',image:null,pages:1,expectedPages:3,warnings:[],printedTotal:null,rows:[row]}]).csv).toContain('"3"');
  });
+ it('uses catalog-item counts for exact matches with missing or package labels',()=>{
+ for(const unit of [null,'','PQ','PAQUETE']){
+ const raw=extraction({unit,packContents:4}),before=JSON.stringify(raw);const [row]=buildInvoiceRows(raw,[product()]);
+ expect(row.billedUnit).toBe(unit);expect(row.proposedQuantity).toBe(3);expect(row.confirmedQuantity).toBe(3);expect(row.product?.name).toBe('Postre LALA 125g / 4pz');expect(row.flags).toEqual([]);expect(JSON.stringify(raw)).toBe(before);
+ }
+ const [unmarked]=buildInvoiceRows(extraction({unit:null,flags:[]}),[product()]);expect(unmarked.proposedQuantity).toBe(3);expect(unmarked.confirmed).toBe(false);
+ });
+ it('keeps identity, quantity and explicit-case conflicts pending without blocking good rows',()=>{
+ const [ambiguous]=buildInvoiceRows(extraction({unit:null}),[product(),product({id:'002'})]);expect(ambiguous.proposedQuantity).toBeNull();expect(ambiguous.confirmed).toBe(false);
+ const [descriptionOnly]=buildInvoiceRows(extraction({unit:null,supplierSku:null}),[product()]);expect(descriptionOnly.proposedQuantity).toBeNull();
+ for(const unit of ['CAJAS','kg','ml'])expect(buildInvoiceRows(extraction({unit}),[product()])[0].proposedQuantity).toBeNull();
+ const [conflict]=buildInvoiceRows(extraction({unit:'PQ',flags:['Faltante: 1; 50 facturados, 49 recibidos'],quantity:50}),[product()]);expect(conflict.billedQuantity).toBe(50);expect(conflict.proposedQuantity).toBe(50);expect(conflict.flags).toContain('Faltante: 1; 50 facturados, 49 recibidos');expect(conflict.confirmed).toBe(false);
+ const raw=extraction({unit:null,flags:[]});raw.rows.push({...raw.rows[0],sourceRow:2,quantity:null});const rows=buildInvoiceRows(raw,[product()]);expect(rows[0].flags).toEqual([]);expect(rows[1].flags).toContain('Cantidad ilegible');
+ const csv=exportCsv([{id:'d',supplier:'TEST',reference:'TEST',image:null,pages:1,expectedPages:null,warnings:[],printedTotal:null,rows:[{...rows[0],confirmed:true,confirmedQuantity:3},rows[1]]}],true);expect(csv.excluded).toHaveLength(1);expect(csv.csv).toContain('"3"');
+ });
  it('normalizes only verified supplier identities and LALA leading zeros',()=>{
  expect(supplierKey('Comercializadora de Lácteos y Derivados, S.A. de C.V.','000123')).toBe(supplierKey('LALA','123'));
  expect(supplierKey('HYGEIA DE MEXICO, S.A. de C.V.','001')).toBe(supplierKey('Hygeia','001'));
