@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {loadPrivate} from './private-fixture';
+import {mainRows,pendingRows,pieces,cents} from '../shared/domain';
+import assert from 'node:assert/strict';
+const root=process.env.PRIVATE_FIXTURE_ROOT??'private';
+const expected=JSON.parse(fs.readFileSync(path.join(root,'regression-expectations.json'),'utf8'));
+const workspace=loadPrivate(root);
+assert.equal(workspace.products.length,expected.products);
+assert.equal(workspace.documents.flatMap(mainRows).length,expected.main);assert.equal(workspace.documents.flatMap(pendingRows).length,expected.pending);
+workspace.documents.forEach((d,i)=>{assert.equal(pieces(mainRows(d)),expected.pieces[i],d.supplier);console.log(`${d.supplier}: ${mainRows(d).length} main, ${pendingRows(d).length} pending, ${pieces(mainRows(d))} pieces`);});
+for(const [index,amount] of Object.entries(expected.amountCents))assert.equal(workspace.documents[Number(index)].rows.reduce((n,r)=>n+cents(r.amount!),0n),BigInt(amount as string));
+console.log('Private regression fixture checks passed. These are not live OCR results.');
