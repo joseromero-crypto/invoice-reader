@@ -33,9 +33,10 @@ export function taxCents(amount:bigint,basisPoints:bigint){return (amount*basisP
 export function convertQuantity(quantity:number|null,sourceUnit:string|null,catalogUnit:string,verifiedFactor?:number){
  if(quantity===null)return {quantity:null,flag:'Cantidad ilegible'};
  if(!Number.isFinite(quantity)||quantity<0)return {quantity:null,flag:'Cantidad inválida'};
- const unit=(sourceUnit??'').toLowerCase();
+ const pieceUnit=(value:string)=>['pieza','piezas','pza','pzas','pz'].includes(value.toLowerCase().replace(/[().\s]/g,''));
+ const unit=(sourceUnit??'').trim().toLowerCase();
  if(['kg','g','l','ml'].includes(unit)&&unit!==catalogUnit)return {quantity:null,flag:'Requiere flujo de unidades de peso o volumen'};
  if(verifiedFactor&&verifiedFactor>0&&Number.isInteger(quantity*verifiedFactor))return {quantity:quantity*verifiedFactor,flag:null};
- if(unit===catalogUnit||(['pieza','piezas','pz'].includes(unit)&&catalogUnit==='pz'))return {quantity,flag:null};
+ if(unit===catalogUnit||(pieceUnit(unit)&&pieceUnit(catalogUnit)))return {quantity,flag:null};
  return {quantity:null,flag:'Conversión de empaque sin verificar'};
 }
