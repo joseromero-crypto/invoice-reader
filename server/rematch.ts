@@ -1,6 +1,6 @@
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {ExtractionSchema} from '../shared/domain';
-import {operationalWarnings} from '../shared/receiving-policy';
+import {documentWarnings} from '../shared/receiving-policy';
 import {buildInvoiceRows} from './match-extraction';
 import {asProduct,catalog} from './workspace';
 import {check,HttpError} from './auth';
@@ -25,6 +25,6 @@ export async function rematchDocument(db:SupabaseClient,orgId:string,userId:stri
  check(await db.from('review_events').insert({org_id:orgId,actor:userId,row_id:row.id,action:'Coincidencias actualizadas desde lectura guardada',before_value:row.review,after_value:review}));
  }
  // Keep raw provider warnings in raw_result; operative document warnings use the current policy.
- check(await db.from('documents').update({warnings:operationalWarnings(document.warnings??[]),metadata_revision:document.metadata_revision+1}).eq('org_id',orgId).eq('id',document.id).eq('metadata_revision',document.metadata_revision));
+ check(await db.from('documents').update({warnings:documentWarnings(document.warnings??[]),metadata_revision:document.metadata_revision+1}).eq('org_id',orgId).eq('id',document.id).eq('metadata_revision',document.metadata_revision));
  return {updated,preserved};
 }
