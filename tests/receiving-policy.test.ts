@@ -21,7 +21,7 @@ describe('uploaded-page receiving policy',()=>{
  expect(exportCsv([{id:'d',supplier:'TEST',reference:'TEST',image:null,pages:1,expectedPages:3,warnings:[],printedTotal:null,rows:[row]}]).csv).toContain('"3"');
  });
  it('uses catalog-item counts for exact matches with missing or package labels',()=>{
- for(const unit of [null,'','PQ','PAQUETE']){
+ for(const unit of [null,'','PQ','PAQUETE','XPK']){
  const raw=extraction({unit,packContents:4}),before=JSON.stringify(raw);const [row]=buildInvoiceRows(raw,[product()]);
  expect(row.billedUnit).toBe(unit);expect(row.proposedQuantity).toBe(3);expect(row.confirmedQuantity).toBe(3);expect(row.product?.name).toBe('Postre LALA 125g / 4pz');expect(row.flags).toEqual([]);expect(JSON.stringify(raw)).toBe(before);
  }

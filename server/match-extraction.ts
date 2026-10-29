@@ -16,7 +16,7 @@ export function buildInvoiceRows(extraction:Extraction,products:Product[],intern
  // Explicit cases and weight/volume still need evidence of the correct quantity column.
  const countLabel=(source.unit??'').toLowerCase().replace(/[.\s]/g,'');
  const identified=best&&best.flags.length===0&&best.evidence.some(e=>['SKU + proveedor','Código de barras exacto','Mapeo confirmado anteriormente'].includes(e));
- const catalogCount=Boolean(identified&&['','pq','pqt','paq','paquete','paquetes','pack','packs'].includes(countLabel)&&source.quantity!==null&&Number.isInteger(source.quantity));
+ const catalogCount=Boolean(identified&&['','pq','pqt','paq','paquete','paquetes','pack','packs','xpk'].includes(countLabel)&&source.quantity!==null&&Number.isInteger(source.quantity));
  const conversion=convertQuantity(source.quantity,catalogCount?'PZ':source.unit,best?.product.unit??'unknown',catalogCount?undefined:rule?Number(rule.factor):undefined);
  // PZ refers to the catalog item, including a catalog multipack. Never multiply by contents in its name.
  const piecesKnown=conversion.quantity!==null;

@@ -7,7 +7,7 @@ const product=(changes:Partial<Product>={}):Product=>({id:'001',sku:'EXAMPLE',na
 describe('acceptance failure regressions',()=>{
  it('counts literal piece spellings without treating packages, cases or unknown units as pieces',()=>{
  for(const unit of ['PIEZA(S)','PZA','PZAS',' pz ','Pz.'])expect(convertQuantity(3,unit,'pz')).toEqual({quantity:3,flag:null});
- for(const unit of ['PQ','PAQUETE','CAJAS',null])expect(convertQuantity(3,unit,'pz').quantity).toBeNull();
+ for(const unit of ['PQ','PAQUETE','XPK','CAJAS',null])expect(convertQuantity(3,unit,'pz').quantity).toBeNull();
  expect(convertQuantity(2,'kg','pz').quantity).toBeNull();
  });
  it('recognizes verified legal identities without changing supplier codes or broad supplier matching',()=>{
