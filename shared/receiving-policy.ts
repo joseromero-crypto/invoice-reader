@@ -17,8 +17,10 @@ export function itemFlags(flags:string[],piecesKnown:boolean){return operational
 export function receptionFlags(source:{flags:string[];rawText:string;quantity:number|null;reception?:{kind:string;text:string|null;quantity:number|null}}){
  const flags=[...source.flags],observation=source.reception;
  if(observation){
-  const same=observation.kind==='same_quantity'&&observation.quantity!==null&&observation.quantity===source.quantity;
-  if(['cross','circle','changed_quantity','return','ambiguous'].includes(observation.kind)||(observation.kind==='same_quantity'&&!same)||(observation.quantity!==null&&observation.quantity!==source.quantity)||(observation.text!==null&&hasReceptionConflict(observation.text)))flags.push(`Recepción pendiente: ${observation.kind}${observation.text?': '+observation.text:''}`);
+  const numericText=observation.text!==null&&/\d/.test(observation.text);
+  const same=observation.kind==='same_quantity'&&observation.quantity!==null&&observation.quantity===source.quantity&&(!numericText||Number(observation.text?.trim())===source.quantity);
+  const uncertainCheck=observation.kind==='check'&&/unclear|uncertain|ambiguous|ilegible|inciert|ambigu|dudos|unreadable|\?/i.test(observation.text??'');
+  if(uncertainCheck||(numericText&&!same)||['cross','circle','same_quantity','changed_quantity','return','ambiguous','signature'].includes(observation.kind)||(observation.kind==='same_quantity'&&!same)||(observation.quantity!==null&&observation.quantity!==source.quantity)||(observation.text!==null&&hasReceptionConflict(observation.text)))flags.push(`Recepción pendiente: ${observation.kind}${observation.text?': '+observation.text:''}`);
  }
  const annotations=source.rawText.matchAll(/(?:marca (?:manuscrita|de (?:cruz|recepci[oó]n))|handwritten|manuscrit[oa]|cantidad encerrada|c[ií]rculo|cross(?:ed)? (?:out|mark)|returned item|devoluci[oó]n|faltante)[^;|]*/gi);
  for(const [annotation] of annotations){

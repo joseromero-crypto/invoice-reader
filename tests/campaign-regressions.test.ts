@@ -29,7 +29,7 @@ it('structured reception observations override a simultaneous check without losi
  for(const kind of ['cross','circle','changed_quantity','return','ambiguous']){
  const [row]=buildInvoiceRows(extraction([source({description:product.name,reception:{kind,text:'Visible annotation',quantity:5}})]),[product]);expect(row.flags.length).toBeGreaterThan(0);expect(row.confirmed).toBe(false);expect(row.billedQuantity).toBe(7);expect(row.proposedQuantity).toBe(7);
  }
- const [same]=buildInvoiceRows(extraction([source({description:product.name,reception:{kind:'same_quantity',text:'7',quantity:7}})]),[product]);expect(same.flags).toEqual([]);expect(same.confirmed).toBe(false);
+ const [same]=buildInvoiceRows(extraction([source({description:product.name,reception:{kind:'same_quantity',text:'7',quantity:7}})]),[product]);expect(same.flags.join()).toContain('Recepción pendiente');expect(same.confirmed).toBe(false);
  const [inconsistent]=buildInvoiceRows(extraction([source({description:product.name,reception:{kind:'same_quantity',text:'5',quantity:5}})]),[product]);expect(inconsistent.flags.length).toBeGreaterThan(0);
 });
 it('preserves row order, repeated lines, null quantities and exact source identifiers',()=>{
