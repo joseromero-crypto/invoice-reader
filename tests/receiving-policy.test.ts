@@ -6,6 +6,15 @@ import {ExtractionSchema,type Product,exportCsv} from '../shared/domain';
 const product=(p:Partial<Product>={}):Product=>({id:'001',sku:'EXAMPLE',name:'Postre LALA 125g / 4pz',supplier:'LALA',supplierSku:'123',barcode:null,unit:'pz',...p});
 const extraction=(changes:any={})=>ExtractionSchema.parse({supplier:'Comercializadora de Lacteos y Derivados, S.A. de C.V.',reference:'TEST',date:null,currency:null,printedPage:2,printedPageCount:3,printedTotal:null,warnings:[],rows:[{sourcePage:1,sourceRow:1,supplierSku:'000123',barcode:null,description:'Postre LALA 125g 4pz',quantity:3,unit:'PZ',packContents:null,price:null,discount:null,tax:null,amount:null,rawText:'000123 Postre LALA 125g 4pz PZ 3',flags:['handwritten_check_mark','pack_contents_in_description_unconfirmed'],...changes}]});
 describe('uploaded-page receiving policy',()=>{
+ it('preserves cross and return conflicts even when reception-mark wording is present',()=>{
+ for(const flag of ['Marca manuscrita en cruz, no es un check; recepción pendiente','Handwritten check mark crossed out; returned item','Marca de recepción ambigua','Marca de recepción ilegible','Marca de recepción poco clara','Se regresa: no se solicitó en O.C.']){
+ expect(operationalWarnings([flag])).toEqual([flag]);
+ expect(hasReceptionMark([flag,'handwritten_check_mark'])).toBe(false);
+ const [row]=buildInvoiceRows(extraction({receptionMarked:true,flags:[flag]}),[product()]);
+ expect(row.flags).toContain(flag);expect(row.confirmed).toBe(false);expect(row.receptionMarked).toBe(false);
+ expect(()=>exportCsv([{id:'d',supplier:'TEST',reference:'TEST',image:null,pages:1,expectedPages:null,warnings:[],printedTotal:null,rows:[row]}],true)).toThrow();
+ }
+ });
  it('keeps a printed PZ count as catalog packs and accepts clear reception marks',()=>{
  const raw=extraction(),before=JSON.stringify(raw);const [row]=buildInvoiceRows(raw,[product()]);
  expect(row.proposedQuantity).toBe(3);expect(row.confirmedQuantity).toBe(3);expect(row.flags).toEqual([]);expect(row.receptionMarked).toBe(true);expect(JSON.stringify(raw)).toBe(before);
