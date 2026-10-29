@@ -12,17 +12,24 @@ const nullableText=z.string().nullable();
 // Normalized coordinates in the uploaded image after EXIF rotation. Keep marks
 // independent of rows so a neighboring-row assignment can be checked in code.
 const pointSchema=z.object({x:z.number().min(0).max(1),y:z.number().min(0).max(1)});
+// Reuse identical shapes so the SDK emits shared definitions rather than
+// separate nullable branches for each evidence inventory. Domain semantics stay
+// the same; this reduces the provider's compiled grammar, not source evidence.
+const nullablePoint=pointSchema.nullable();
+const nullableBaseline=z.object({start:pointSchema,end:pointSchema}).nullable();
+const nullableQuantity=z.number().nonnegative().nullable();
+const nullablePage=z.number().int().positive().nullable();
 export const AnnotationEvidenceSchema=z.object({
- rows:z.array(z.object({sourceRow:z.number().int().positive(),sourcePage:z.number().int().positive(),inspection:z.enum(['complete','uncertain']),baseline:z.object({start:pointSchema,end:pointSchema}).nullable()})),
- marks:z.array(z.object({id:z.string().min(1),sourcePage:z.number().int().positive(),kind:z.enum(['check','cross','circle','same_quantity','changed_quantity','return','ambiguous','signature']),text:nullableText,quantity:z.number().nonnegative().nullable(),position:pointSchema.nullable(),candidateRows:z.array(z.number().int().positive()),anchorSupplierSku:nullableText,association:z.enum(['certain','ambiguous'])}))
+ rows:z.array(z.object({sourceRow:z.number().int().positive(),sourcePage:z.number().int().positive(),inspection:z.enum(['complete','uncertain']),baseline:nullableBaseline})),
+ marks:z.array(z.object({id:z.string().min(1),sourcePage:z.number().int().positive(),kind:z.enum(['check','cross','circle','same_quantity','changed_quantity','return','ambiguous','signature']),text:nullableText,quantity:nullableQuantity,position:nullablePoint,candidateRows:z.array(z.number().int().positive()),anchorSupplierSku:nullableText,association:z.enum(['certain','ambiguous'])}))
 });
 // Independently located printed cells; item baselines stop BEFORE the quantity
 // column so an already selected number cannot define its own row geometry.
 export const QuantityEvidenceSchema=z.object({
- rows:z.array(z.object({sourceRow:z.number().int().positive(),sourcePage:z.number().int().positive(),baseline:z.object({start:pointSchema,end:pointSchema}).nullable()})),
- cells:z.array(z.object({id:z.string().min(1),sourcePage:z.number().int().positive(),text:nullableText,value:z.number().nonnegative().nullable(),position:pointSchema.nullable(),candidateRows:z.array(z.number().int().positive()),anchorSupplierSku:nullableText,association:z.enum(['certain','ambiguous'])}))
+ rows:z.array(z.object({sourceRow:z.number().int().positive(),sourcePage:z.number().int().positive(),baseline:nullableBaseline})),
+ cells:z.array(z.object({id:z.string().min(1),sourcePage:z.number().int().positive(),text:nullableText,value:nullableQuantity,position:nullablePoint,candidateRows:z.array(z.number().int().positive()),anchorSupplierSku:nullableText,association:z.enum(['certain','ambiguous'])}))
 });
-export const ExtractionSchema=z.object({supplier:nullableText,reference:nullableText,date:z.string().date().nullable(),currency:nullableText,printedPage:z.number().int().positive().nullable(),printedPageCount:z.number().int().positive().nullable(),printedTotal:nullableText,warnings:z.array(z.string()),annotationEvidence:AnnotationEvidenceSchema.optional(),quantityEvidence:QuantityEvidenceSchema.optional(),rows:z.array(z.object({sourcePage:z.number().int().positive(),sourceRow:z.number().int().positive(),supplierSku:nullableText,barcode:nullableText,description:z.string().min(1),quantity:z.number().nonnegative().nullable(),unit:nullableText,packContents:z.number().positive().nullable(),price:nullableText,discount:nullableText,tax:nullableText,amount:nullableText,rawText:z.string(),reception:z.object({kind:z.enum(['none','check','cross','circle','same_quantity','changed_quantity','return','ambiguous','signature']),text:nullableText,quantity:z.number().nonnegative().nullable()}).optional(),fieldUncertainties:z.array(z.object({field:z.enum(['supplierSku','barcode','description','quantity']),reason:z.string().min(1)})).optional(),receptionMarked:z.boolean().optional(),flags:z.array(z.string())})).min(1)});
+export const ExtractionSchema=z.object({supplier:nullableText,reference:nullableText,date:z.string().date().nullable(),currency:nullableText,printedPage:nullablePage,printedPageCount:nullablePage,printedTotal:nullableText,warnings:z.array(z.string()),annotationEvidence:AnnotationEvidenceSchema.optional(),quantityEvidence:QuantityEvidenceSchema.optional(),rows:z.array(z.object({sourcePage:z.number().int().positive(),sourceRow:z.number().int().positive(),supplierSku:nullableText,barcode:nullableText,description:z.string().min(1),quantity:nullableQuantity,unit:nullableText,packContents:z.number().positive().nullable(),price:nullableText,discount:nullableText,tax:nullableText,amount:nullableText,rawText:z.string(),reception:z.object({kind:z.enum(['none','check','cross','circle','same_quantity','changed_quantity','return','ambiguous','signature']),text:nullableText,quantity:nullableQuantity}).optional(),fieldUncertainties:z.array(z.object({field:z.enum(['supplierSku','barcode','description','quantity']),reason:z.string().min(1)})).optional(),receptionMarked:z.boolean().optional(),flags:z.array(z.string())})).min(1)});
 export function mainRows(d:Document){return d.rows.filter(r=>r.flags.length===0);}
 export function pendingRows(d:Document){return d.rows.filter(r=>r.flags.length>0);}
 export function pieces(rows:Row[]){return rows.reduce((sum,r)=>sum+(r.confirmedQuantity??r.proposedQuantity??0),0);}
