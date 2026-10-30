@@ -39,3 +39,16 @@ The remote check is read-only and does not run paid extraction. Private developm
 ## Data handling
 
 Catalog imports preserve exact selected Retool text and text IDs. Photos are private. Main and pending lists remain separate, ambiguous matches require review, printed quantities do not confirm physical receipt, and independent scans do not replace another user's list. Clipboard output includes Artículo Calii, Piezas and SKU Calii headers.
+
+## Extraction request diagnostics
+
+See [HTTP400 response protocol](docs/HTTP400-REPAIR.md) for the compiler-limit repair and its validation tradeoff. The worker and local photo smoke test share the same request/image preparation and strict response parser.
+
+An explicitly authorized local photo diagnostic makes one provider call only with `--send`; it never writes production receiving records. Output must be a new directory under ignored `private/`:
+
+```sh
+node --env-file=.env.local --import tsx scripts/smoke-invoice.ts private/example.jpg private/new-smoke
+# For an authorized paid read, use another NEW output directory and append --send.
+```
+
+Results, source text and usage stay private. Existing directories refuse reuse; there is no automatic retry.

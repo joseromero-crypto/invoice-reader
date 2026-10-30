@@ -26,3 +26,6 @@ docs/INVOICE-EXAMPLES.md
 docs/DATA-AND-SETUP-INPUTS.md
 docs/REQUIREMENTS.md
 supabase/.temp/
+
+# Local bug history includes private invoice identifiers and investigation evidence
+HTTP400-BUG-HANDOFF.md
