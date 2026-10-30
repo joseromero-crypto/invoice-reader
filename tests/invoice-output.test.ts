@@ -12,9 +12,9 @@ describe('invoice response envelope',()=>{
   const response=await client.messages.create({model:'synthetic',...invoiceRequestOptions(5),messages:[{role:'user',content:invoiceExtractionInstructions(5)}]});
   expect(sent.max_tokens).toBe(32000);expect(invoiceRequestOptions(1).max_tokens).toBe(16000);
   expect(sent.output_config.format.type).toBe('json_schema');
-  expect(sent.output_config.format.schema.required).toEqual(['invoice']);
+  expect(sent.output_config.format.schema.required).toEqual(['version','meta','warnings','rows','rowFlags','rowUncertainties','annotationRows','marks','quantityRows','cells','coverage']);
   expect(sent.output_config.format.schema.additionalProperties).toBe(false);
-  expect(JSON.stringify(sent.output_config.format.schema).length).toBeLessThan(1024);
+  expect(JSON.stringify(sent.output_config.format.schema).length).toBeLessThan(2048);
   expect(sent.tools).toBeUndefined();expect(sent.output_format).toBeUndefined();
   const prompt=sent.messages[0].content;
   for(const field of ['annotationEvidence','quantityEvidence','reception','fieldUncertainties','receptionMarked'])expect(prompt).toContain(field);

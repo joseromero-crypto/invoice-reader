@@ -1,49 +1,57 @@
-// Explicit local diagnostic: one real photo request, no production DB writes.
-// node --env-file=.env.local --import tsx scripts/smoke-invoice.ts IMAGE OUTPUT_DIR [--send]
+// Explicit local diagnostic: one complete invoice request, no production DB writes.
+// node --env-file=.env.local --import tsx scripts/smoke-invoice.ts IMAGE [IMAGE ...] OUTPUT_DIR [--between-tools] [--send]
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
-import {invoiceRequest,prepareInvoiceImage} from '../server/invoice-request';
+import {invoiceRequest,prepareInvoicePage,invoiceImageSizes} from '../server/invoice-request';
 import {invoiceOutputEvidence,readInvoiceOutput} from '../server/invoice-output';
 import {extractionFailure,type ExtractionStage} from '../server/extraction-failure';
 import {buildInvoiceRows} from '../server/match-extraction';
 import {loadPrivate} from './private-fixture';
 import {limits} from '../server/config';
-const [imageFile,outputDir,...flags]=process.argv.slice(2);
-if(!imageFile||!outputDir||flags.some(f=>f!=='--send'))throw Error('Usage: smoke-invoice.ts IMAGE PRIVATE_OUTPUT_DIR [--send]');
+const args=process.argv.slice(2),send=args.at(-1)==='--send';
+if(send)args.pop();
+const betweenTools=args.at(-1)==='--between-tools';
+if(betweenTools)args.pop();
+const outputDir=args.pop(),imageFiles=args;
+if(!outputDir||!imageFiles.length||imageFiles.length>limits().maxPages||[...imageFiles,outputDir].some(f=>f.startsWith('--')))throw Error('Usage: smoke-invoice.ts IMAGE [IMAGE ...] PRIVATE_OUTPUT_DIR [--between-tools] [--send]');
 const out=path.resolve(outputDir),privateRoot=fs.realpathSync('private');
 if(!out.startsWith(privateRoot+path.sep))throw Error('Diagnostic output must stay inside private/');
 // New directory only: never overwrite prior evidence or retry a started request.
 fs.mkdirSync(out,{recursive:false,mode:0o700});
 if(!fs.realpathSync(out).startsWith(privateRoot+path.sep))throw Error('Output path escapes private/');
 const write=(name:string,value:unknown)=>fs.writeFileSync(path.join(out,name),JSON.stringify(value,null,2),{flag:'wx',mode:0o600});
-const original=fs.readFileSync(imageFile);
-if(original.length>limits().maxUploadBytes)throw Error('Image too large');
+const originals=imageFiles.map(file=>fs.readFileSync(file));
+if(originals.some(original=>original.length>limits().maxUploadBytes))throw Error('Image too large');
 const model=process.env.ANTHROPIC_MODEL;
-let image:Anthropic.ImageBlockParam;
-try{image=await prepareInvoiceImage(original);}catch(error){
+const images:Anthropic.ImageBlockParam[]=[];
+try{for(const [i,original] of originals.entries())images.push(...await prepareInvoicePage(original,model??'claude-sonnet-5-5',i+1,originals.length<3));}catch(error){
  const diagnostic=extractionFailure(error,false,'image_validation');
  write('result.json',{kind:'local photo preflight; no provider request',...diagnostic,finishedAt:new Date().toISOString()});
  console.log(JSON.stringify(diagnostic));process.exit(1);
 }
-const request=invoiceRequest(model??'$ANTHROPIC_MODEL',[image]);
-const summary={kind:'local photo smoke; not hosted/DB/receiving acceptance',imageSha256:createHash('sha256').update(original).digest('hex'),schemaSha256:createHash('sha256').update(JSON.stringify(request.output_config?.format)).digest('hex'),model:model??null,photos:1,maxRequests:1,maxRetries:0,maxOutputTokens:request.max_tokens};
+const request=invoiceRequest(model??'claude-sonnet-5-5',images,betweenTools?'between_tools':'adaptive',undefined,originals.length);
+const timeout=originals.length>=3?300000:180000;
+const summary={kind:'local invoice preflight/smoke; not hosted/DB/receiving acceptance',imageSha256:originals.map(original=>createHash('sha256').update(original).digest('hex')),schemaSha256:createHash('sha256').update(JSON.stringify(request.output_config?.format)).digest('hex'),promptSha256:createHash('sha256').update(JSON.stringify({system:request.system,text:request.messages[0].content instanceof Array?request.messages[0].content.filter(block=>block.type==='text'):request.messages[0].content})).digest('hex'),model:request.model,modelConfigured:!!model,photos:originals.length,views:images.length,maxRequests:1,maxRetries:0,maxOutputTokens:request.max_tokens,effort:request.output_config?.effort??'model default',thinking:request.thinking?.type??'model default/adaptive',transportVersion:7,imageSizes:invoiceImageSizes(images),timeoutMs:timeout,promptCharacters:String(request.system).length+JSON.stringify(request.messages[0].content instanceof Array?request.messages[0].content.filter(block=>block.type==='text'):request.messages[0].content).length,preparedBase64Characters:images.reduce((sum,image)=>sum+(image.source.type==='base64'?image.source.data.length:0),0),outputCapacityPrediction:'not available; preflight does not predict reasoning or certify photo accuracy'};
 write('request-summary.json',summary);
 write('schema.json',request.output_config?.format);
-if(!flags.includes('--send')){console.log(JSON.stringify({...summary,status:'dry run; no network request'}));process.exit(0);}
+write('request-contract.json',{model:request.model,max_tokens:request.max_tokens,thinking:request.thinking??null,output_config:request.output_config,system:request.system,textBlocks:request.messages[0].content instanceof Array?request.messages[0].content.filter(block=>block.type==='text'):request.messages[0].content,viewMetadata:invoiceImageSizes(images)});
+write('source-checkpoint.json',Object.fromEntries(['server/invoice-output.ts','server/invoice-image.ts','server/invoice-tables.ts','server/invoice-request.ts'].map(file=>{const content=fs.readFileSync(file,'utf8');return [file,{sha256:createHash('sha256').update(content).digest('hex'),content}];})));
+for(const [i,image] of images.entries())if(image.source.type==='base64')fs.writeFileSync(path.join(out,`view-${String(i+1).padStart(2,'0')}.jpg`),Buffer.from(image.source.data,'base64'),{flag:'wx',mode:0o600});
+if(!send){console.log(JSON.stringify({...summary,status:'dry run; no network request'}));process.exit(0);}
 const key=process.env.ANTHROPIC_API_KEY;
 if(!model||!key?.startsWith('sk-ant-')||key.length<40||!/^[A-Za-z0-9_-]+$/.test(key))throw Error('Configure a full local Anthropic key and model; no request made');
 write('started.json',{...summary,startedAt:new Date().toISOString()});
 let stage:ExtractionStage='anthropic_request';
 try{
- const client=new Anthropic({apiKey:key,maxRetries:0,timeout:180000});
+ const client=new Anthropic({apiKey:key,maxRetries:0,timeout});
  const response=await client.messages.create({...request,model});
  write('response.json',{model:response.model,usage:response.usage,...invoiceOutputEvidence(response)});
  stage='structured_output';
- const extraction=readInvoiceOutput(response);
+ const extraction=readInvoiceOutput(response,invoiceImageSizes(images));
  if(new Set(extraction.rows.map(r=>r.sourceRow)).size!==extraction.rows.length)throw Error('Duplicate source row references');
- if(extraction.rows.some(r=>r.sourcePage>1))throw Error('Invalid source page reference');
+ if(extraction.rows.some(r=>r.sourcePage>originals.length))throw Error('Invalid source page reference');
  write('extraction.json',extraction);
  stage='catalog_matching';
  // Catalog is used only AFTER extraction, exactly as in the worker.

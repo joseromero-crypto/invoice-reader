@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import {createHash} from 'node:crypto';
-import {invoiceRequest,prepareInvoiceImage} from './invoice-request';
+import {invoiceRequest,prepareInvoicePage,invoiceImageSizes} from './invoice-request';
 import {buildInvoiceRows} from './match-extraction';
 import {documentWarnings} from '../shared/receiving-policy';
 import {invoiceOutputEvidence,readInvoiceOutput} from './invoice-output';
@@ -27,17 +27,17 @@ export async function extractJob(request:Request,jobId:string){
  for(const page of pages){if(!page.object_path.startsWith(`${orgId}/${document.id}/`))throw Error('Invalid object ownership');
  const blob=check(await db.storage.from('invoices').download(page.object_path))!;if(blob.size>limits().maxUploadBytes)throw Error('Image too large');
  const buffer=Buffer.from(await blob.arrayBuffer());if(createHash('sha256').update(buffer).digest('hex')!==page.content_hash)throw Error('Content hash mismatch');
- images.push(await prepareInvoiceImage(buffer));
+ images.push(...await prepareInvoicePage(buffer,model,page.page_number,pages.length<3));
  }
  const anthropic=new Anthropic({apiKey:process.env.ANTHROPIC_API_KEY,maxRetries:0,timeout:pages.length>=3?300000:180000});
  const reservation=check(await db.from('extraction_jobs').select('status,claim_token,lease_until').eq('org_id',orgId).eq('id',job.id).single())!;
  const membership=check(await db.from('members').select('user_id').eq('org_id',orgId).eq('user_id',userId).maybeSingle());
  if(!membership||reservation.status!=='processing'||reservation.claim_token!==claimed.claim_token||new Date(reservation.lease_until)<new Date())throw Error('Job reservation expired');
- const requestBody=invoiceRequest(model,images);
+ const requestBody=invoiceRequest(model,images,'adaptive',undefined,pages.length);
  stage='anthropic_request';paidStarted=true;
  const response=await anthropic.messages.create(requestBody);
  received={model:response.model,usage:response.usage,output:invoiceOutputEvidence(response)};stage='structured_output';
- const extraction=readInvoiceOutput(response);validated=extraction;
+ const extraction=readInvoiceOutput(response,invoiceImageSizes(images));validated=extraction;
  if(new Set(extraction.rows.map(r=>r.sourceRow)).size!==extraction.rows.length)throw Error('Duplicate source row references');
  if(extraction.rows.some(r=>r.sourcePage>pages.length))throw Error('Invalid source page reference');
  extraction.warnings=documentWarnings(extraction.warnings);

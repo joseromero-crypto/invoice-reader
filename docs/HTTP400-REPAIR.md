@@ -1,4 +1,8 @@
+Current output-capacity follow-up (30 October 2026): see [OUTPUT-CAPACITY-REPAIR.md](OUTPUT-CAPACITY-REPAIR.md) for the local native-table v7 repair, unchanged16K/32K limits, paid capacity evidence and remaining OCR/automatic-receiving limitations. The HTTP400 history below is retained.
+
 # Invoice request HTTP400 repair
+
+Historical 29 October checkpoint. The later local compact-transport capacity candidate and its failed overall acceptance are documented in [OUTPUT-CAPACITY-REPAIR.md](OUTPUT-CAPACITY-REPAIR.md). Production has not been updated by that repair.
 
 The provider rejected the expanded native response schema because its compiled grammar was too large. Removing nullable unions, date constraints, shared references and nesting did not produce an accepted full-contract schema. A minimal native control succeeded, isolating the defect to the response contract rather than an invoice image.
 
