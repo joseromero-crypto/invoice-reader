@@ -72,3 +72,13 @@ it('rematches a saved transcription for free, preserving confirmed rows',async()
  expect(fetchMock).not.toHaveBeenCalled();
  const review=db.updates.find((u:any)=>u[0]==='invoice_rows')[1].review;expect(review).toMatchObject({id:'a',status:'ok',product:{id:'topo'},proposedQuantity:60});expect(review.raw).toBeUndefined();
 });
+it('tells the receiver to capture in Retool and contact José when the Anthropic account has no credit',async()=>{
+ fetchMock.mockResolvedValue(new Response(JSON.stringify({type:'error',error:{type:'invalid_request_error',message:'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}}),{status:400}));
+ state.db=fakeDB();await expect(extractJob(new Request('http://local'),'job')).rejects.toThrow(/contactar a José/);
+ const failed=state.db.updates.find((u:any)=>u[0]==='extraction_jobs'&&u[1].status==='failed')[1];
+ expect(failed.error).toBe('Error de lectura, favor de capturar directo en Retool y contactar a José para cargar créditos a la aplicación.');
+ fetchMock.mockResolvedValue(new Response(JSON.stringify({type:'error',error:{type:'authentication_error',message:'invalid x-api-key'}}),{status:401}));
+ state.db=fakeDB();await expect(extractJob(new Request('http://local'),'job')).rejects.toThrow(/contactar a José/);
+ fetchMock.mockResolvedValue(new Response(JSON.stringify({type:'error',error:{type:'overloaded_error',message:'Overloaded'}}),{status:529}));
+ state.db=fakeDB();await expect(extractJob(new Request('http://local'),'job')).rejects.toThrow(/saturado/);
+});

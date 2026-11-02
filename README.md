@@ -25,7 +25,16 @@ Configure the public Supabase URL/publishable key for Build scope; server Supaba
 
 Apply all SQL files in `supabase/migrations` in filename order for a new database. Provision a company and invited users; administrator members see all eight hubs, receivers need explicit hub assignments. RLS protects shared history and private photo/catalog storage. Internal policy helpers live in an unexposed schema; mutations are server-only.
 
-AI reads have no app-imposed daily call cap. Daily counters retain usage accounting; explicit retries, attempt limits and duplicate-job fencing remain enforced.
+AI reads have no app-imposed daily cap or attempt limit; a receiver can retry a failed read. The job lease still prevents processing one job twice. If the Anthropic account runs out of credit, the invoice shows "Error de lectura, favor de capturar directo en Retool y contactar a José…".
+
+Add a receiver: create the user in Supabase → Authentication → Users → Add user (email + password, auto-confirm), then run in the SQL Editor (change the email and hub):
+
+```sql
+insert into members(org_id,user_id,role)
+select o.id,u.id,'receiver' from organizations o,auth.users u where u.email='receptor@calii.com';
+insert into hub_members(org_id,hub_id,user_id)
+select h.org_id,h.id,u.id from hubs h,auth.users u where h.name='MH Cumbres' and u.email='receptor@calii.com';
+```
 
 See [integration and hosted acceptance](docs/INTEGRATION.md) for the complete checklist. A successful build or accepted background dispatch is not proof of a completed extraction.
 

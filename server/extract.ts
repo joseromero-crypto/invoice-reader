@@ -8,6 +8,13 @@ import {leanMappings} from './rematch';
 import {requireHub} from './hubs';
 import {limits} from './config';
 import {authorize,check,HttpError} from './auth';
+// Failures the receiver can't fix by retrying: no credit on the Anthropic account, or a bad/revoked key.
+export const NO_CREDIT='Error de lectura, favor de capturar directo en Retool y contactar a José para cargar créditos a la aplicación.';
+export function readFailure(error:string|null){
+ if(/credit balance|purchase credits|billing/i.test(error??'')||/^HTTP 40[123]\b/.test(error??''))return NO_CREDIT;
+ if(/^HTTP (429|5\d\d)\b/.test(error??''))return 'El servicio de lectura está saturado. Reintenta en unos minutos o captura directo en Retool.';
+ return `No se pudo leer la factura: ${error??'sin respuesta'}`.slice(0,300);
+}
 const isImage=(b:Buffer)=>(b[0]===0xff&&b[1]===0xd8)||(b[0]===0x89&&b[1]===0x50&&b[2]===0x4e&&b[3]===0x47);
 // Lean reader: photos → one transcription call (lean/transcribe.ts) → deterministic catalog match (lean/match.ts).
 export async function extractJob(request:Request,jobId:string){
@@ -33,7 +40,7 @@ export async function extractJob(request:Request,jobId:string){
   images.push(await prepareImage(buffer));
  }
  read=await transcribe(apiKey,model,images);
- const t=read.transcription;if(!t||!Array.isArray(t.rows))throw new HttpError(502,`No se pudo leer la factura: ${read.error??'sin respuesta'}`.slice(0,300));
+ const t=read.transcription;if(!t||!Array.isArray(t.rows))throw new HttpError(502,readFailure(read.error));
  const rawProducts=await catalog(db,orgId),products=rawProducts.map(asProduct);
  const result=match(t,rawProducts.map(asCatalogItem),await leanMappings(db,orgId,rawProducts));
  const supplier=result.supplier??t.supplier,reference=t.documentRef,warnings=[...result.warnings];
