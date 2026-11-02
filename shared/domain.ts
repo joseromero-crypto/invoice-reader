@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import {PrintedReadingSchema} from './printed-reading.ts';
+import {BasicReadingSchema} from './basic-reading.ts';
 export const ProductSchema = z.object({id:z.string(),sku:z.string(),name:z.string(),nameColumn:z.string().optional(),supplier:z.string(),supplierSku:z.string().nullable(),barcode:z.string().nullable(),unit:z.string(),raw:z.record(z.string(),z.unknown()).optional()});
 export type Product = z.infer<typeof ProductSchema>;
 export type Candidate = {product:Product; evidence:string[]; flags:string[]; score:number};
@@ -29,7 +31,7 @@ export const QuantityEvidenceSchema=z.object({
  rows:z.array(z.object({sourceRow:z.number().int().positive(),sourcePage:z.number().int().positive(),baseline:nullableBaseline})),
  cells:z.array(z.object({id:z.string().min(1),sourcePage:z.number().int().positive(),text:nullableText,value:nullableQuantity,position:nullablePoint,candidateRows:z.array(z.number().int().positive()),anchorSupplierSku:nullableText,association:z.enum(['certain','ambiguous'])}))
 });
-export const ExtractionSchema=z.object({supplier:nullableText,reference:nullableText,date:z.string().date().nullable(),currency:nullableText,printedPage:nullablePage,printedPageCount:nullablePage,printedTotal:nullableText,warnings:z.array(z.string()),annotationEvidence:AnnotationEvidenceSchema.optional(),quantityEvidence:QuantityEvidenceSchema.optional(),rows:z.array(z.object({sourcePage:z.number().int().positive(),sourceRow:z.number().int().positive(),supplierSku:nullableText,barcode:nullableText,description:z.string().min(1),quantity:nullableQuantity,unit:nullableText,packContents:z.number().positive().nullable(),price:nullableText,discount:nullableText,tax:nullableText,amount:nullableText,rawText:z.string(),reception:z.object({kind:z.enum(['none','check','cross','circle','same_quantity','changed_quantity','return','ambiguous','signature']),text:nullableText,quantity:nullableQuantity}).optional(),fieldUncertainties:z.array(z.object({field:z.enum(['supplierSku','barcode','description','quantity']),reason:z.string().min(1)})).optional(),receptionMarked:z.boolean().optional(),flags:z.array(z.string())})).min(1)});
+export const ExtractionSchema=z.object({readingMode:z.enum(['basic-v1','basic-v2']).optional(),basicReading:BasicReadingSchema.optional(),printedReading:PrintedReadingSchema.optional(),supplier:nullableText,reference:nullableText,date:z.string().date().nullable(),currency:nullableText,printedPage:nullablePage,printedPageCount:nullablePage,printedTotal:nullableText,warnings:z.array(z.string()),annotationEvidence:AnnotationEvidenceSchema.optional(),quantityEvidence:QuantityEvidenceSchema.optional(),rows:z.array(z.object({sourcePage:z.number().int().positive(),sourceRow:z.number().int().positive(),supplierSku:nullableText,barcode:nullableText,description:z.string().min(1),quantity:nullableQuantity,unit:nullableText,packContents:z.number().positive().nullable(),price:nullableText,discount:nullableText,tax:nullableText,amount:nullableText,rawText:z.string(),reception:z.object({kind:z.enum(['none','check','cross','circle','same_quantity','changed_quantity','return','ambiguous','signature']),text:nullableText,quantity:nullableQuantity}).optional(),fieldUncertainties:z.array(z.object({field:z.enum(['supplierSku','barcode','description','quantity']),reason:z.string().min(1)})).optional(),receptionMarked:z.boolean().optional(),flags:z.array(z.string())})).min(1)});
 export function mainRows(d:Document){return d.rows.filter(r=>r.flags.length===0);}
 export function pendingRows(d:Document){return d.rows.filter(r=>r.flags.length>0);}
 export function pieces(rows:Row[]){return rows.reduce((sum,r)=>sum+(r.confirmedQuantity??r.proposedQuantity??0),0);}
@@ -39,7 +41,9 @@ export function confirmRow(row:Row,product:Product,quantity:number,identityCheck
 }
 const headers=['item_name','pieces','calii_sku','supplier_sku','barcode','evidence','calii_product_id','document_ref','source_row'];
 function csvCell(value:unknown){let s=String(value??'');if(/^[\s]*[=+@-]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';}
-export function exportCsv(documents:Document[],partial=false){
+export const needsSourceReview=(d:Document)=>d.rows.some(r=>['basic-v1','basic-v2'].includes(String(r.sourceDetails?.readingMode)));
+export function exportCsv(documents:Document[],partial=false,sourceReviewed=false){
+ if(documents.some(needsSourceReview)&&!sourceReviewed)throw Error('Revisa las fotos originales y la lista completa antes de exportar.');
  const excluded=documents.flatMap(d=>d.rows.filter(r=>!r.confirmed||r.flags.length).map(r=>`${d.reference} / ${r.sourceRow}`));
  const warnings=documents.flatMap(d=>d.warnings);
  if(!partial&&(excluded.length||warnings.length))throw Error('Hay filas sin confirmar o advertencias. Usa la exportación parcial explícita.');

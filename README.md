@@ -2,6 +2,10 @@
 
 A small invoice-checking step before Retool: **select hub → upload invoice photos → review Calii items and pieces → copy or export**. Pending products stay separate until confirmed. This app does not update Retool inventory.
 
+## Continuing this work
+
+**Read [CLAUDE.md](CLAUDE.md) first** — current design (`lean/`), measured results, working rules and the remaining plan. Old handoffs are archived and must not be followed.
+
 ## Development
 
 Use Node 24. Install and run:
@@ -42,7 +46,7 @@ Catalog imports preserve exact selected Retool text and text IDs. Photos are pri
 
 ## Extraction request diagnostics
 
-See [HTTP400 response protocol](docs/HTTP400-REPAIR.md) for the compiler-limit repair and its validation tradeoff. The worker and local photo smoke test share the same request/image preparation and strict response parser.
+See [HTTP400 response protocol](docs/HTTP400-REPAIR.md) for the compiler-limit repair and its validation tradeoff. The historical detailed photo smoke test retains its original request/transport. The worker now uses the explicit basic Sonnet path described in [basic evaluation results](docs/BASIC-SONNET-RESULTS.md), with strict common parsing, local matching and a US$0.099 remaining-document gate. This local candidate failed general production acceptance and is not deployed.
 
 An explicitly authorized local photo diagnostic makes one provider call only with `--send`; it never writes production receiving records. Output must be a new directory under ignored `private/`:
 

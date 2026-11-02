@@ -1,0 +1,29 @@
+## Restart direction — 2 November 2026
+
+Read [AI-CONTINUATION-BRIEF.md](AI-CONTINUATION-BRIEF.md) before continuing. The local implementation is unchanged from the final 30 October source checkpoint; this update is documentation only. The next priority is unpaid work on explicit human column/unit clarification and the missing failed-read manual-entry path, followed by source-slot consistency and a frozen acceptance/receiver-effort protocol. These are proposed next features, not completed ones. Production acceptance remains failed. Existing per-document budgets/attempts are not reset; no new paid campaign or deployment is authorized by this documentation request. Older plans and measurements below are retained as history; use the current brief/results for corrections and limits.
+
+## Latest repair checkpoint — 30 October 2026
+
+Implemented and validated locally. See [BASIC-SONNET-REPAIR-RESULTS.md](BASIC-SONNET-REPAIR-RESULTS.md) for all 13 measurements, failures, source-photo corrections, manual work and configuration. All four original budget refusals now have complete reads. 229 tests, build/typecheck, private fixtures and 37-invoice/868-row replay pass; all 1,931 prior private files and 24 original photos are unchanged. Added repair generation estimate $0.267386; cumulative authorized campaign $0.772760, billing unverified. No operational writes or approvals.
+
+Production acceptance still FAILS. Native v3 fixes the malformed-reference layout, but source-field omissions and mark errors remain. All basic receipt confirmations are human. Only invoice 12 freshly used the final prompt; other checks used earlier revisions. Do not call this a frozen full-set success or claim proven receiver savings. The old invoice 3 quantity vector was wrong: initial basic counts were correct; the historical 238/238 claim is withdrawn. Keep all old material below as history.
+
+## Completed work and remaining validation
+
+Steps 1–4 implemented and verified. Step 5 ran sequentially within the original ledger: invoice 3 malformed v2 response investigated, then invoices 5/8/9/12 completed on successive v3 prompt revisions. No further paid calls are scheduled. Output minima remain conservative; representative frozen full-set calibration is still open. Remaining manual work includes case-unit interpretation, source-key/barcode completion, known historical mark ownership, and documents with no affordable retry. No attempt reset or substitute job is permitted.
+
+# Basic Sonnet repair: build and validation plan
+
+30 October 2026. Status: implementation in progress; no acceptance claim.
+
+The first basic campaign assessed all 13 second-round invoices: eight complete, one truncated and four refused locally before generation. The refusal gate worked, but blanket detail views consumed input budget. Completed output also included shifted row quantities and cases selected instead of printed pieces. These are OCR errors even when human review contains them.
+
+1. **Printed quantity columns.** Add an explicit strict versioned contract. Transcribe literal quantity headers once per table and aligned source cells per row, including units. Local code selects a unique explicit piece column; otherwise a sole billed column may be used. Ambiguous columns, unclear cells or conflicting units remain unresolved with specific input required. Preserve every original cell, identifier, description, source text and photo/row reference. Do not infer pack multipliers or source units. Retain v1/detailed historical parsing.
+2. **Useful image views.** Retain a full overview of every original. Replace blind half-page fallback with bounded ink-region detail selection, explicit pixel limits, magnification benefit and overlap accounting. Keep EXIF orientation; an axis detector cannot establish text polarity. Record diagnosis and exact prepared bytes. A cheap overview and a clean model label cannot certify row/ink coverage.
+3. **Output and admission.** Preserve 16K/32K hard ceilings, zero SDK retries and one generation per claim. Reserve padded exact counted input plus permitted maximum output. Initially retain conservative useful-output minima; calibrate only with measured complete v2 outputs, not expected evaluation rows. Refuse an unaffordable complete request.
+4. **Unpaid first.** Focused parser/selection/receiving/image regressions, all tests, build/typecheck, private fixtures and historical replay. Reproduce all 13 manifests and run free account/count compatibility checks, recording image plans and remaining balances. Freeze code/request/image hashes before generation.
+5. **Bounded measurement.** If admission and unpaid checks pass, inspect a changed candidate on a quantity-shift layout before a case/piece layout. One explicit retry at most; use prior invoice charges/reservations and attempt history. No substitute jobs, refreshed allowance, automatic escalation or paid classification. Investigate any failure before continuing. Exhausted documents require manual handling.
+
+Keep all existing evidence and photos immutable. New repair evidence belongs in private/testing/basic-sonnet-repair-20261030 and links back to basic-sonnet-20261030. All generation charges, including unknown/failed calls, share the original US$0.099/document and US$1.287 aggregate limits. Prior new-campaign estimated usage is US$0.505374; historical campaigns are separate. Billing remains unverified. The US$0.05–0.08 average is a target, not a result.
+
+Receiving remains human: clear proposals initially unconfirmed, explicit bulk physical review, individual identity/count/ownership input for doubts, doubtful counts blank, explicit zero valid, billed source separate. No AI-only approval. Source review, unresolved/export guards, local matching, ownership, fences, duplicate protection and attempt limits remain mandatory. Tasks 3–5, push/deploy and operational writes stay out of scope.

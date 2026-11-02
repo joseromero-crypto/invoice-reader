@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-export type ExtractionStage='image_validation'|'anthropic_request'|'structured_output'|'catalog_matching'|'persist_result';
+export type ExtractionStage='image_validation'|'spend_preflight'|'anthropic_request'|'structured_output'|'catalog_matching'|'persist_result';
 // Provider messages may echo private input. Classify recognized validation
 // patterns into application-owned constants; never persist the message itself.
 function validationCategory(error:InstanceType<typeof Anthropic.APIError>){

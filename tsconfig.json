@@ -22,6 +22,7 @@
   },
   "include": [
     "src",
+    "lean",
     "shared",
     "server",
     "netlify",

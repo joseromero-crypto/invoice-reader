@@ -1,0 +1,25 @@
+import {z} from 'zod';
+import type Anthropic from '@anthropic-ai/sdk';
+import {BasicReadingSchema,type BasicReading} from '../shared/basic-reading';
+export const basicTransportVersion='invoice-basic-tables-v1';
+const records=z.array(z.array(z.string()));
+const Wire=z.object({version:z.literal(basicTransportVersion),meta:z.array(z.string()),warnings:z.array(z.string()),rows:records,uncertainties:records,coverage:records}).strict();
+const encode=(value:string|number|null)=>value===null?'':typeof value==='number'?String(value):value===''?'~':value.startsWith('~')?'~'+value:value;
+const text=(value:string)=>value===''?null:value==='~'?'':value.startsWith('~~')?value.slice(1):value.startsWith('~')?(()=>{throw Error('Invalid basic source escape');})():value;
+function number(value:string){if(!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)||!Number.isFinite(Number(value)))throw Error('Invalid basic number');return Number(value);}
+export function encodeBasicTables(value:BasicReading){
+ const source=BasicReadingSchema.parse(value);
+ return {version:basicTransportVersion,meta:[source.supplier,source.reference,source.date].map(encode),warnings:source.warnings,rows:source.rows.map(r=>[r.sourcePage,r.sourceRow,r.supplierSku,r.barcode,r.description,r.quantity,r.unit,r.rawText,r.handwriting.kind,r.handwriting.text,r.handwriting.ownership,...r.handwriting.candidateRows].map(encode)),uncertainties:source.rows.map(r=>[String(r.sourceRow),...r.fieldUncertainties.flatMap(f=>[f.field,encode(f.reason)])]),coverage:source.coverage.map(c=>[c.sourcePage,c.inspection,c.content,c.visibleRowCount,...c.sourceRows].map(encode))};
+}
+export function decodeBasicTables(value:unknown):BasicReading{
+ const wire=Wire.parse(value);if(wire.meta.length!==3||wire.rows.some(r=>r.length<12)||wire.coverage.some(c=>c.length<4))throw Error('Invalid basic column count');
+ const uncertainties=new Map<number,Array<{field:string;reason:string|null}>>();
+ for(const record of wire.uncertainties){if(!record.length||record.length%2!==1)throw Error('Invalid basic uncertainties');const id=number(record[0]);if(uncertainties.has(id))throw Error('Duplicate basic uncertainties');const fields=[];for(let i=1;i<record.length;i+=2)fields.push({field:record[i],reason:text(record[i+1])});uncertainties.set(id,fields);}
+ const rows=wire.rows.map(r=>{const id=number(r[1]);if(!uncertainties.has(id))throw Error('Missing basic uncertainties');return {sourcePage:number(r[0]),sourceRow:id,supplierSku:text(r[2]),barcode:text(r[3]),description:text(r[4]),quantity:r[5]===''?null:number(r[5]),unit:text(r[6]),rawText:text(r[7]),fieldUncertainties:uncertainties.get(id),handwriting:{kind:r[8],text:text(r[9]),ownership:r[10],candidateRows:r.slice(11).map(number)}};});
+ if(uncertainties.size!==rows.length||rows.some(r=>!uncertainties.has(r.sourceRow)))throw Error('Invalid basic uncertainty references');
+ return BasicReadingSchema.parse({version:'invoice-basic-v1',supplier:text(wire.meta[0]),reference:text(wire.meta[1]),date:text(wire.meta[2]),warnings:wire.warnings,rows,coverage:wire.coverage.map(c=>({sourcePage:number(c[0]),inspection:c[1],content:c[2],visibleRowCount:number(c[3]),sourceRows:c.slice(4).map(number)}))});
+}
+export function basicTablesFormat():Anthropic.JSONOutputFormat{
+ const schema=z.toJSONSchema(Wire,{reused:'inline'}) as Record<string,any>;delete schema.$schema;schema.properties.version={type:'string',enum:[basicTransportVersion]};return {type:'json_schema',schema};
+}
+export const basicTablesInstructions=`Return ONLY the native invoice-basic-tables-v1 object. All tables contain JSON arrays of STRING cells. meta=[supplier,reference,date YYYY-MM-DD]. Unknown nullable source cells are the empty string "". Genuine known empty TEXT is "~"; escape a literal source string beginning with ~ by adding one ~. Numbers are ordinary nonnegative decimal strings, references are positive integer strings. Exact source strings retain leading zeros, punctuation and whitespace. Each rows record has 11 fixed columns followed by one or more candidate sourceRow cells: [sourcePage ORIGINAL PHOTO,sourceRow,supplierSku,barcode,description,billedQuantity (PIEZAS column when visible; NEVER CAJAS in that case),printedUnit,rawText,handwritingKind,handwritingLiteralText,ownership,...candidateRows]. handwritingKind is exactly none_seen/check_like/other/uncertain; ownership exactly row/uncertain. uncertainties explicitly contains ONE record for EVERY extracted sourceRow: [sourceRow,field,reason,...additional field/reason pairs], or [sourceRow] after inspecting all fields with no doubts. Fields exactly supplierSku/barcode/description/quantity/unit. coverage is the FINAL audit: one record per ORIGINAL PHOTO [sourcePage,inspection,content,visibleRowCount,...sourceRows]. inspection complete/incomplete; content items/non_items. List overlapping visible physical rows in every relevant photo, extract them once. Fixed column counts are NEVER limits on the NUMBER OF ITEM ROWS. Preserve all rows and source observations, no geometry/inventories or catalog guesses. warnings is an array of concise strings. Return complete JSON, no markdown.`;

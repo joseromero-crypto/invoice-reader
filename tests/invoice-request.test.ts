@@ -50,3 +50,15 @@ it('leaves response headroom for dense rotated details without suppressing eithe
  expect(request.output_config?.effort).toBe('medium');expect(request.max_tokens).toBe(16000);expect(request.thinking).toBeUndefined();
  expect(request.system).toContain('annotationEvidence as a separate visual inventory');expect(request.system).toContain('quantityEvidence as a separate inventory');
 });
+
+it('retains the full contract and ceilings for Haiku with a bounded low-effort profile',()=>{
+ const image={type:'image' as const,source:{type:'base64' as const,media_type:'image/jpeg' as const,data:'synthetic'}};
+ const sizes=[{width:1920,height:1080,sourcePage:1}];
+ const haiku=invoiceRequest('claude-haiku-5-5',[image],'adaptive',sizes,1),sonnet=invoiceRequest('claude-sonnet-5-5',[image],'adaptive',sizes,1);
+ expect(haiku.output_config?.effort).toBe('low');expect(JSON.stringify(haiku.output_config?.format)).toContain('invoice-records-v2');expect(haiku.max_tokens).toBe(16000);expect(haiku.thinking).toBeUndefined();
+ expect(String(haiku.system).length).toBeLessThan(String(sonnet.system).length);
+ for(const field of ['annotationRows','marks','quantityRows','cells','rowFlags','rowUncertainties','coverage'])expect(JSON.stringify(haiku)).toContain(field);
+ expect(haiku.system).toContain('ALL marks and ALL printed billed cells');
+ expect(haiku.system).toContain('billed quantity unchanged');
+ expect(()=>invoiceRequest('claude-haiku-5-5',[image],'between_tools',sizes,1)).toThrow('requires Sonnet');
+});

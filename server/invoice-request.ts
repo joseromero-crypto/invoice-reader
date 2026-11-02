@@ -1,3 +1,5 @@
+import {invoiceRecordsFormat,invoiceRecordsInstructions} from './invoice-records';
+import {economySystem} from './invoice-economy';
 import type Anthropic from '@anthropic-ai/sdk';
 import {invoiceImageSizes} from './invoice-image';
 export {prepareInvoiceImage,prepareInvoicePage,invoiceImageSizes} from './invoice-image';
@@ -20,6 +22,7 @@ export function invoiceRequest(model:string,images:Anthropic.ImageBlockParam[],t
  // Dense rotated regions also need response headroom at the small cap.
  // These are workload heuristics, never proof of clean/complete source.
  const crowded=images.length>4||sizes.some(s=>s.dense===true&&(s.quarterTurns??0)!==0);
- const effort=thinking==='adaptive'&&!crowded?'high':'medium';
- return {model,...invoiceRequestOptions(documentPages,model,thinking,effort),system:system+'\n'+annotationInstructions+'\n'+quantityInstructions,messages:[{role:'user',content:[...images.flatMap((image,i)=>[{type:'text' as const,text:`View ${i+1}: original photo ${originalPages[i]}, ${sizes[i].region?'detail close-up':'full source overview'}. Coordinates refer to this view (${sizes[i].width} by ${sizes[i].height} unpadded pixels).`},image]),{type:'text',text:invoiceExtractionInstructions(documentPages,sizes)}]}]};
+ const haiku=/^claude-haiku-5-5$/.test(model);
+ const effort=haiku?'high':thinking==='adaptive'&&!crowded?'high':'medium';
+ return {model,...invoiceRequestOptions(documentPages,model,thinking,effort),...(haiku?{output_config:{effort:'low' as const,format:invoiceRecordsFormat(sizes)}}:{}),system:haiku?economySystem:system+'\n'+annotationInstructions+'\n'+quantityInstructions,messages:[{role:'user',content:[...images.flatMap((image,i)=>[{type:'text' as const,text:`View ${i+1}: original photo ${originalPages[i]}, ${sizes[i].region?'detail close-up':'full source overview'}. Coordinates refer to this view (${sizes[i].width} by ${sizes[i].height} unpadded pixels).`},image]),{type:'text',text:haiku?invoiceRecordsInstructions(documentPages,sizes):invoiceExtractionInstructions(documentPages,sizes)}]}]};
 }

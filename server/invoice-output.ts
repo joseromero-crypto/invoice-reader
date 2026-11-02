@@ -1,14 +1,20 @@
+import {columnsTransportVersion,decodePrintedTables,readPrintedOutput} from './invoice-basic-columns';
+import {columnsV3Version,readPrintedOutputV3} from './invoice-basic-columns-v3';
 import type Anthropic from '@anthropic-ai/sdk';
+import {basicTransportVersion,decodeBasicTables} from './invoice-basic-tables';
+import {readBasicOutput} from './invoice-basic';
+import {invoiceRecordVersion,invoiceRecordsToTables} from './invoice-records';
 import {zodOutputFormat} from '@anthropic-ai/sdk/helpers/zod';
 import {ExtractionSchema} from '../shared/domain';
 import {assertInvoiceShape} from './invoice-shape';
 import {invoiceTablesFormat,invoiceTableColumns,encodeInvoiceTables,decodeInvoiceTables,type InvoiceImageSize} from './invoice-tables';
 import {decodeInvoiceTransport,invoiceTransportContract} from './invoice-transport';
-// Saved results remain backward compatible; new paid reads must return the inventory.
+// Saved results remain backward compatible. Fresh DETAILED reads retain mandatory
+// inventories; basic reads have their own explicit strict source validator.
 // Fresh reads always report these observations, using kind=none, [] and false
 // only when supported by inspection. Legacy domain parsing stays optional.
 const FreshRowSchema=ExtractionSchema.shape.rows.element.required({reception:true,fieldUncertainties:true,receptionMarked:true});
-const FreshExtractionSchema=ExtractionSchema.required({annotationEvidence:true,quantityEvidence:true}).extend({rows:FreshRowSchema.array().min(1)});
+const FreshExtractionSchema=ExtractionSchema.omit({readingMode:true,basicReading:true,printedReading:true}).required({annotationEvidence:true,quantityEvidence:true}).extend({rows:FreshRowSchema.array().min(1)});
 // Full native domain schemas exceeded the provider grammar limit. Compile
 // only small native string tables; restore and validate every original
 // source/evidence field locally before matching or persistence.
@@ -21,21 +27,32 @@ export function invoiceExtractionInstructions(pages:number,imageSizes?:InvoiceIm
 // Keep the user's hard output ceilings. Selected effort still permits adaptive thinking;
 // it is not a hard reservation for JSON and must be validated on fresh photos.
 // Model-specific controls are never copied onto arbitrary configured models.
-export type InvoiceReasoning='adaptive'|'between_tools';
-export function invoiceRequestOptions(pages:number,model='claude-sonnet-5-5',thinking:InvoiceReasoning='adaptive',effort:'medium'|'high'='medium'){
+export type InvoiceReasoning='adaptive'|'between_tools'|'disabled';
+export function invoiceRequestOptions(pages:number,model='claude-sonnet-5-5',thinking:InvoiceReasoning='adaptive',effort:'medium'|'high'='medium'):Pick<Anthropic.MessageCreateParamsNonStreaming,'max_tokens'|'thinking'|'output_config'>{
  if(!Number.isInteger(pages)||pages<1||pages>8)throw Error('Invalid page count');
  const sonnet55=/^claude-sonnet-5-5(?:-\d{8})?$/.test(model);
  if(thinking==='between_tools'&&!sonnet55)throw Error('between_tools requires Sonnet 5.5');
- const reasoning=sonnet55?{effort}:{};
- return {max_tokens:pages>=3?32000:16000,...(thinking==='between_tools'?{thinking:{type:'between_tools' as const}}:{}),output_config:{...reasoning,format:invoiceOutputFormat()}};
+ const haiku55=/^claude-haiku-5-5(?:-\d{8})?$/.test(model);
+ if(thinking==='disabled'&&!haiku55)throw Error('disabled thinking requires Haiku 5.5');
+ const reasoning=haiku55?{effort:thinking==='disabled'?'high' as const:'low' as const}:sonnet55?{effort}:{};
+ return {max_tokens:pages>=3?32000:16000,...(thinking==='between_tools'?{thinking:{type:'between_tools' as const}}:thinking==='disabled'?{thinking:{type:'disabled' as const}}:{}),output_config:{...reasoning,format:invoiceOutputFormat()}};
 }
 // Failed output stays private in extraction_jobs; never turn partial JSON into receiving rows.
 export function invoiceOutputEvidence(response:Pick<Anthropic.Message,'stop_reason'|'content'>){return {stopReason:response.stop_reason,textBlocks:response.content.filter(block=>block.type==='text').map(block=>block.text)};}
-export function readInvoiceOutput(response:Pick<Anthropic.Message,'stop_reason'|'content'>,imageSizes?:InvoiceImageSize[]){
+export function readInvoiceOutput(response:Pick<Anthropic.Message,'stop_reason'|'content'>,imageSizes?:InvoiceImageSize[],expectedMode?:'basic-v1'|'basic-v2'|'basic-v3'):ReturnType<typeof ExtractionSchema.parse>{
  if(response.stop_reason!=='end_turn')throw Error('Extraction did not complete');
  const text=response.content.filter(block=>block.type==='text');
  if(text.length!==1)throw Error('Missing or ambiguous structured output');
- const envelope=JSON.parse(text[0].text);
+ const native=JSON.parse(text[0].text);
+ if(expectedMode==='basic-v3'&&native?.version!==columnsV3Version)throw Error('Expected explicit v3 printed-column contract');
+ if(expectedMode==='basic-v2'&&![columnsTransportVersion,columnsV3Version].includes(native?.version))throw Error('Expected explicit printed-column contract');
+ if(native?.version===columnsV3Version){if(expectedMode==='basic-v1')throw Error('Expected explicit basic reading contract');if(!imageSizes?.length)throw Error('Basic source photos required');return readPrintedOutputV3(native,imageSizes);}
+ if(expectedMode==='basic-v1'&&native?.version===columnsTransportVersion)throw Error('Expected explicit basic reading contract');
+ if(native?.version===columnsTransportVersion){if(!imageSizes?.length)throw Error('Basic source photos required');return readPrintedOutput(decodePrintedTables(native),imageSizes);}
+ if(expectedMode==='basic-v1'&&!['invoice-basic-v1',basicTransportVersion].includes(native?.version))throw Error('Expected explicit basic reading contract');
+ if(native?.version===basicTransportVersion){if(!imageSizes?.length)throw Error('Basic source photos required');return readBasicOutput(decodeBasicTables(native),imageSizes);}
+ if(native?.version==='invoice-basic-v1'){if(!imageSizes?.length)throw Error('Basic source photos required');return readBasicOutput(native,imageSizes);}
+ const envelope=native?.version===invoiceRecordVersion?invoiceRecordsToTables(native):native;
  let value:unknown;
  if(envelope&&typeof envelope==='object'&&!Array.isArray(envelope)&&Object.hasOwn(envelope,'version'))value=decodeInvoiceTables(envelope,imageSizes);
  else {
