@@ -139,6 +139,13 @@ td small{display:block;font-size:var(--fs-sm);color:var(--c-muted)}
 .invoice-dates{display:flex;gap:var(--s-3);flex-wrap:wrap;margin-top:6px;font-size:var(--fs-sm);color:var(--c-muted)}
 .document-actions{display:flex;gap:var(--s-3);align-items:center;flex-wrap:wrap}
 .document-note{margin:0 var(--s-5) var(--s-3);padding:var(--s-3) var(--s-4);border-radius:var(--r-md);background:var(--c-surface);font-size:var(--fs-sm);color:var(--c-muted)}
+/* Long waits: always show what is happening. */
+.loading-card .dropzone{color:var(--c-teal-dark)}
+.loading-card .dropzone>strong{margin-top:var(--s-2)}
+.reading-card{display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--s-2);margin:0 var(--s-5) var(--s-5);padding:var(--s-8) var(--s-5);border-radius:var(--r-lg);background:var(--c-teal-light);color:var(--c-teal-dark)}
+.reading-card>strong{margin-top:var(--s-2);font-size:var(--fs-h2);font-weight:800;letter-spacing:-.02em;color:var(--c-ink)}
+.reading-card>span{max-width:360px;font-size:14px;color:var(--c-muted)}
+.reading-time{font-size:34px;font-weight:800;letter-spacing:-.035em;color:var(--c-ink);font-variant-numeric:tabular-nums}
 /* Blocking/attention message = ink highlight. */
 .document-warning{display:flex;align-items:center;gap:var(--s-3);flex-wrap:wrap;margin:0 var(--s-5) var(--s-3);padding:var(--s-3) var(--s-4);border-radius:var(--r-lg);background:var(--c-ink);color:var(--c-white);font-size:14px;font-weight:600}
 .document-warning>span{flex:1}
@@ -247,7 +254,7 @@ td small{display:block;font-size:var(--fs-sm);color:var(--c-muted)}
  .simple-title{align-items:flex-start}
  .history-panel table{min-width:0}.history-panel th:last-child,.history-panel td:last-child{display:none}.history-panel th,.history-panel td{padding:10px}
  .document-heading{flex-direction:column;align-items:flex-start;padding:var(--s-4)}
- .document-warning,.document-note,.lean-add{margin-left:var(--s-3);margin-right:var(--s-3)}
+ .document-warning,.document-note,.lean-add,.reading-card{margin-left:var(--s-3);margin-right:var(--s-3)}
  .table-toolbar{padding:var(--s-2) var(--s-3) var(--s-3)}
  .lean-toolbar>.primary{flex:1}
  .lean-toolbar .search{margin-left:0;width:100%;min-width:0}
@@ -260,3 +267,4 @@ td small{display:block;font-size:var(--fs-sm);color:var(--c-muted)}
  .simple-export p{width:100%}
  .simple-export button{flex:1}
 }
+.hubs-loading{display:flex;align-items:center;gap:var(--s-2);margin:var(--s-6) 0}
