@@ -33,7 +33,7 @@ function LeanRow({row,draft,setDraft,products,disabled,onConfirm}:{row:Row;draft
  <small className="lean-hint" title={hint}>{hint}{!row.confirmed&&/×/.test(row.conversion)?` · ${row.conversion}`:''}</small>
  {!row.confirmed&&status!=='ok'&&reasons.length>0&&<small className="lean-reasons">{reasons.join(' · ')}</small>}</div>
  {row.confirmed?<strong className="lean-qty">{row.confirmedQuantity}</strong>:<input className="lean-pieces" aria-label="Piezas" inputMode="numeric" disabled={disabled} value={draft.pieces} placeholder="?" onChange={e=>setDraft({...draft,pieces:e.target.value})}/>}
- {row.confirmed?<span className="lean-done" aria-label="Confirmado"><Check size={18}/></span>:<button className={status==='ok'?'lean-tick':'secondary lean-confirm'} aria-label="Confirmar" title="Confirmar" disabled={disabled||!draft.product||!validPieces(draft.pieces)} onClick={onConfirm}><Check size={16}/>{status!=='ok'&&' Confirmar'}</button>}</li>;
+ {row.confirmed?<span className="lean-done" aria-label="Confirmado"><Check size={18}/></span>:<button className={status==='ok'?'lean-tick':'lean-tick lean-confirm'} aria-label="Confirmar" title="Confirmar" disabled={disabled||!draft.product||!validPieces(draft.pieces)} onClick={onConfirm}><Check size={18}/></button>}</li>;
 }
 export default function ReviewList({doc,products,busy,readOnly,onConfirm,onAddRow}:{doc:Document;products:Product[];busy:boolean;readOnly:boolean;onConfirm:(items:Confirmation[])=>Promise<void>;onAddRow:(product:Product,quantity:number,description:string)=>Promise<void>}){
  const [drafts,setDrafts]=useState<Record<string,Draft>>({}),[acked,setAcked]=useState<string[]>([]),[search,setSearch]=useState('');
@@ -46,7 +46,7 @@ export default function ReviewList({doc,products,busy,readOnly,onConfirm,onAddRo
  const openWarnings=doc.warnings.filter(w=>!acked.includes(w));
  const ready=doc.rows.filter(r=>rowStatus(r)==='ok'&&!r.confirmed).map(item).filter((c):c is Confirmation=>!!c);
  const disabled=busy||readOnly;
- const table=(rows:Row[])=><ul className="lean-list"><li className="lean-head"><span>ARTÍCULO CALII</span><span>PIEZAS</span><span/></li>{rows.map(r=><LeanRow key={r.id} row={r} draft={draft(r)} setDraft={setDraft(r)} products={products} disabled={disabled} onConfirm={()=>{const c=item(r);if(c)onConfirm([c]);}}/>)}</ul>;
+ const table=(rows:Row[])=><ul className="lean-list"><li className="lean-head"><span>Artículo Calii</span><span>Piezas</span><span/></li>{rows.map(r=><LeanRow key={r.id} row={r} draft={draft(r)} setDraft={setDraft(r)} products={products} disabled={disabled} onConfirm={()=>{const c=item(r);if(c)onConfirm([c]);}}/>)}</ul>;
  const confirmed=doc.rows.filter(r=>r.confirmed);
  return <>
  {openWarnings.map(w=><div className="document-warning" key={w}><TriangleAlert size={16}/><span>{w}</span><button className="text-button" onClick={()=>setAcked([...acked,w])}>Entendido</button></div>)}

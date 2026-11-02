@@ -54,6 +54,7 @@ The full per-row report is in `private/lean-bench/sonnet-v2/REPORT.md`.
 - Migration `20261102120000_lean_reader_no_attempt_fence.sql` (removes the 2-attempt fence and the daily-usage counter from `claim_extraction_v1`) is written but **not applied**. Until it is, a document can be retried only once.
 - Catalog load: `read_catalog_snapshot` is ~22.6 MB (4,887 products with `raw`, ~4 s). `load` now takes the browser's `catalogVersion` and re-sends products only when `organizations.catalog_revision` changed; its reads run in parallel. Measured locally: polls 6–12 s → 1.3–2.2 s (34 KB). The first open and the worker still read the full snapshot once.
 - Local test setup: port 5173 may be taken by another project, and `netlify dev` applies the `/* → /index.html` rewrite to Vite's module requests. What works: `netlify functions:serve --port 9999` plus Vite with a local-only config that proxies `/api` and `/.netlify/functions` to 9999.
+- Match rules added from live tests (Nov 2): an unlabeled quantity column whose sum equals a printed pieces total ("PIEZAS EN VENTA") counts pieces (Bimbo: 7 → 0 review rows); the whole-catalog supplier-code fallback only accepts items whose name resembles the description (Arca "14" no longer hits other suppliers' items).
 - Learned: the bench photos are 4096×3072 and the API already downscaled them, so ≤2576 px gives the same reads at the same cost (invoices 4, 10, 12 re-run as `sonnet-v2-2576`: 69/69 quantities, same identity).
 
 **Phase 4 — delete the old reader** once Phases 2–3 work end to end. Remove `server/invoice-*.ts` (except whatever Phase 2 still imports), `shared/annotation-association.ts`, `shared/quantity-alignment.ts`, `shared/printed-reading.ts`, `shared/basic-reading.ts`, the old paid/eval scripts (`scripts/basic-*`, `smoke-invoice.ts`, `evaluate-*`, `verify-*`, `validate-basic-history.ts`) and their tests. Nothing live imports them any more; also unused now: `server/match-extraction.ts`, `server/extraction-failure.ts`, `shared/receiving-policy.ts`, `shared/quantity-review.ts`, `shared/matching.ts` (except `supplierKey`, used by `shared/catalog.ts`). Keep auth, hubs, catalog upload, domain/export.
@@ -61,6 +62,10 @@ The full per-row report is in `private/lean-bench/sonnet-v2/REPORT.md`.
 **Later:**
 - Test the 7 older photos in `private/invoices/` (Bimbo receipts lying on top of a Calii sheet, Sigma). Add them to the bench with answer keys.
 - Timed real-receiver test at one hub.
+
+## Visual design
+
+Calii theme v1 (same as Sorting Hub): white page, grey surfaces, Calii teal #00C3B3, Plus Jakarta Sans. Tokens and `c-` components live in `src/calii-theme.css`; the app's own classes in `src/app.css` use only those tokens. Rules: no other hues (attention = black pill/highlight, never amber), at most one teal action per screen ("Confirmar todos los listos" on the review screen; export buttons are ink), text on teal is ink, sentence case, pill buttons ≥44px. On the review list the Calii item name and Piezas are the biggest things; the printed invoice text is a one-line hint.
 
 ## Commands
 
