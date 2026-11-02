@@ -56,4 +56,27 @@ describe('lean match', () => {
     expect(r.proposals[0].candidates[0]?.id).toBe('topo');
     expect(r.proposals[0].status).toBe('review');
   });
+
+  it('treats an unlabeled column as pieces when it adds up to a printed pieces total (Bimbo)', () => {
+    const bimbo = [item({ id: 'pan', name: 'Pan blanco Bimbo 620g', supplier: 'Bimbo', barcodes: ['7500810029183'], perPurchaseUnit: 5 }), item({ id: 'arte', name: 'Pan artesano Bimbo 567g', supplier: 'Bimbo', barcodes: ['7501030452553'], perPurchaseUnit: 5 })];
+    const rows = [row({ codes: [{ header: 'COD BARRAS', value: '7500810029183' }], quantities: ['30'] }), row({ codes: [{ header: 'COD BARRAS', value: '7501030452553' }], quantities: ['25'] })];
+    const r = match(doc(['CANT'], rows, [{ label: 'PIEZAS EN VENTA', value: '55' }]), bimbo);
+    expect(r.proposals.map(p => [p.status, p.quantity])).toEqual([['ok', 30], ['ok', 25]]);
+    // Without the total it stays a question (30 piezas or 30 cajas?).
+    expect(match(doc(['CANT'], rows), bimbo).proposals[0].status).toBe('review');
+  });
+
+  it('ignores a short code that only matches unrelated products of other suppliers (Coca-Cola Light "14")', () => {
+    const cat = [...catalog, item({ id: 'light', name: 'Refresco lata Coca Cola Light 355ml', supplierSku: '1193' }), item({ id: 'almendra', name: 'Almendra en hojuelas Calii 250g', supplier: 'Aligonza', supplierSku: '14' }), item({ id: 'galleta', name: 'Galletas de avena Liz Bakery 152g', supplier: 'Flor de Liz', supplierSku: '14' })];
+    const r = match(doc(['CAJAS', 'PIEZAS'], [
+      row({ codes: [{ header: 'DESCRIPCION', value: '1152' }], quantities: ['1', '12'] }),
+      row({ codes: [{ header: 'DESCRIPCION', value: '2574' }], quantities: ['1', '8'] }),
+      row({ codes: [{ header: 'DESCRIPCION', value: '14' }], description: 'COCA-COLA LIGHT 355 ML NR LAT 24', quantities: ['1', '24'] }),
+    ]), cat);
+    const p = r.proposals[2];
+    expect(p.item).toBeNull();
+    expect(p.reasons).not.toContain('clave de proveedor en varios productos');
+    expect(p.candidates[0].id).toBe('light');
+    expect(p.candidates.map(c => c.id)).not.toContain('almendra');
+  });
 });

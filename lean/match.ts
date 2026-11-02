@@ -137,7 +137,15 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
   const byBarcode = new Map<string, CatalogItem[]>();
   for (const it of catalog) for (const b of it.barcodes) { const k = normCode(b); if (k.length >= 6) byBarcode.set(k, [...(byBarcode.get(k) ?? []), it]); }
 
-  const rows = t.rows ?? [], cols = t.quantityColumns ?? [];
+  const rows = t.rows ?? [];
+  // A printed pieces total (e.g. Bimbo "PIEZAS EN VENTA 136") that equals the sum of an unlabeled
+  // quantity column proves that column counts pieces.
+  const cols = (t.quantityColumns ?? []).map((h, i) => {
+    if (isPieceHeader(h) || isCaseHeader(h)) return h;
+    const sum = rows.reduce((a, r) => a + (num(r.quantities?.[i]) ?? 0), 0);
+    const total = (t.printedTotals ?? []).find(x => /PIEZ|PZA/i.test(x.label) && !/CAJ/i.test(x.label) && num(x.value) === sum);
+    return sum > 0 && total ? `${h} (piezas: suma = ${total.label} ${num(total.value)})` : h;
+  });
   const codes = rows.map(rowCodes);
 
   // Supplier: the catalog supplier whose barcodes/SKUs explain the most rows (printed legal names often
@@ -173,15 +181,16 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
     for (const k of [...keys, ...barcodes]) { const id = mappings.get(`${mapSupplier}|${k}`); const hit = id && catalog.find(c => c.id === id); if (hit) { item = hit; matchedBy = 'mapping'; break; } }
     const bcHits = [...new Set(barcodes.flatMap(b => byBarcode.get(b) ?? []))];
     let skuHits = [...new Set(keys.flatMap(k => bySku.get(k) ?? []))];
-    // Distributors (e.g. Alpura routes) also deliver other brands: fall back to the whole catalog.
-    if (!skuHits.length) skuHits = [...new Set(keys.flatMap(k => skuGlobal.get(k) ?? []))];
+    const desc = tokens(row.description ?? '');
+    // Distributors (e.g. Alpura routes) also deliver other brands: fall back to the whole catalog, but only
+    // to items whose name resembles the printed description (short codes like "14" repeat across suppliers).
+    if (!skuHits.length) skuHits = [...new Set(keys.flatMap(k => skuGlobal.get(k) ?? []))].filter(it => similarity(desc, tokens(it.name)) >= 0.3);
     if (!item && bcHits.length === 1) { item = bcHits[0]; matchedBy = 'barcode'; }
     else if (!item && bcHits.length > 1) reasons.push('código de barras en varios productos del catálogo');
     if (!item && skuHits.length === 1) { item = skuHits[0]; matchedBy = 'supplierSku'; }
     else if (!item && skuHits.length > 1) reasons.push('clave de proveedor en varios productos');
     if (item && matchedBy === 'barcode' && skuHits.length && !skuHits.includes(item)) reasons.push(`clave ${keys.join('/')} apunta a otro producto (${skuHits[0].name}); se usó el código de barras`);
 
-    const desc = tokens(row.description ?? '');
     const rank = (list: (readonly [CatalogItem, Set<string>])[]) => list.map(([it, tk]) => ({ id: it.id, name: it.name, sku: it.sku, score: similarity(desc, tk) }))
       .filter(c => c.score > 0.25).sort((a, b) => b.score - a.score).slice(0, 3);
     let candidates = item ? [] : rank(poolTokens);
