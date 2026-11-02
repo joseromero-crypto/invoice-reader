@@ -52,7 +52,7 @@ The full per-row report is in `private/lean-bench/sonnet-v2/REPORT.md`.
 - "Actualizar coincidencias" re-runs `match()` on the saved transcription for free.
 - Dev: "Cargar ensayo privado" (vite, local only) shows the saved `private/lean-bench/sonnet-v2` reads matched with the current code (`PRIVATE_LEAN_RUN` picks another run).
 - Migration `20261102120000_lean_reader_no_attempt_fence.sql` (removes the 2-attempt fence and the daily-usage counter from `claim_extraction_v1`) is written but **not applied**. Until it is, a document can be retried only once.
-- Known slowness: `read_catalog_snapshot` returns ~22.6 MB (4,887 products with `raw`) in ~4 s, and `loadWorkspace` reads it on every 4 s poll. Locally a `load` once hit the 30 s function limit and the worker took 18–44 s for a 5–13 s model call. Fix next: have `load` skip `raw` or stop re-sending the catalog every poll.
+- Catalog load: `read_catalog_snapshot` is ~22.6 MB (4,887 products with `raw`, ~4 s). `load` now takes the browser's `catalogVersion` and re-sends products only when `organizations.catalog_revision` changed; its reads run in parallel. Measured locally: polls 6–12 s → 1.3–2.2 s (34 KB). The first open and the worker still read the full snapshot once.
 - Local test setup: port 5173 may be taken by another project, and `netlify dev` applies the `/* → /index.html` rewrite to Vite's module requests. What works: `netlify functions:serve --port 9999` plus Vite with a local-only config that proxies `/api` and `/.netlify/functions` to 9999.
 - Learned: the bench photos are 4096×3072 and the API already downscaled them, so ≤2576 px gives the same reads at the same cost (invoices 4, 10, 12 re-run as `sonnet-v2-2576`: 69/69 quantities, same identity).
 

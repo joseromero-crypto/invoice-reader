@@ -8,7 +8,7 @@ import {rematchDocument} from '../../server/rematch';
 import {mappingKeys} from '../../lean/match.ts';
 const uuid=z.string().uuid();
 const Input=z.discriminatedUnion('action',[
- z.object({action:z.literal('hubs')}),z.object({action:z.literal('history'),hubId:uuid,before:z.object({at:z.string().datetime({offset:true}),id:uuid}).optional()}),z.object({action:z.literal('create'),hubId:uuid}),z.object({action:z.literal('latest'),hubId:uuid}),z.object({action:z.literal('load'),sessionId:uuid}),
+ z.object({action:z.literal('hubs')}),z.object({action:z.literal('history'),hubId:uuid,before:z.object({at:z.string().datetime({offset:true}),id:uuid}).optional()}),z.object({action:z.literal('create'),hubId:uuid}),z.object({action:z.literal('latest'),hubId:uuid}),z.object({action:z.literal('load'),sessionId:uuid,catalogVersion:uuid.nullable().optional()}),
  z.object({action:z.literal('document'),sessionId:uuid}),
  z.object({action:z.literal('rematch'),sessionId:uuid,documentId:uuid}),
  z.object({action:z.literal('metadata'),sessionId:uuid,documentId:uuid,supplier:z.string().trim().min(1).max(200),invoiceDate:z.string().date().nullable(),revision:z.number().int().nonnegative()}),
@@ -35,7 +35,7 @@ export default async function handler(request:Request){
  if(b.action==='latest'){await requireHub(db,orgId,userId,b.hubId);const latest=check(await db.from('receiving_sessions').select('id').eq('org_id',orgId).eq('hub_id',b.hubId).order('created_at',{ascending:false}).limit(1).maybeSingle());return Response.json({sessionId:latest?.id??null});}
  const session=check(await db.from('receiving_sessions').select('*').eq('org_id',orgId).eq('id',b.sessionId).maybeSingle());if(!session)throw new HttpError(404,'Session not found');
  await requireHub(db,orgId,userId,session.hub_id);
- if(b.action==='load')return Response.json({workspace:await loadWorkspace(db,orgId,b.sessionId)});
+ if(b.action==='load')return Response.json({workspace:await loadWorkspace(db,orgId,b.sessionId,b.catalogVersion)});
  if(b.action==='snapshot'){const id=check(await db.rpc('snapshot_receipt',{p_actor:userId,p_org:orgId,p_session:b.sessionId,p_partial:b.partial}))!;return Response.json({snapshotId:id});}
  if(session.status!=='open')throw new HttpError(409,'Receipt is already saved');
  if(b.action==='document'){const document=check(await db.from('documents').insert({org_id:orgId,session_id:b.sessionId}).select('id').single())!;return Response.json({documentId:document.id});}

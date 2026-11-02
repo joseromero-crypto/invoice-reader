@@ -11,7 +11,7 @@ export type Row = {id:string;revision?:number;sourceRow:number;sourcePage?:numbe
  status?:'ok'|'review'|'excluded';reasons?:string[];mappingSupplier?:string;columns?:string[];manual?:boolean};
 export type Document = {id:string;scannedAt?:string;invoiceDate?:string|null;metadataRevision?:number;supplier:string;reference:string;image:string|null;images?:string[];pages:number;expectedPages:number|null;notices?:string[];warnings:string[];rows:Row[];printedTotal:string|null;jobStatus?:string;jobError?:string};
 export type Audit = {at:string;action:string;rowId:string|null;before:unknown;after:unknown};
-export type Workspace = {documents:Document[];products:Product[];audit:Audit[];mode:'synthetic'|'private'|'live';sessionId?:string;hubId?:string;readOnly?:boolean;catalogExample?:boolean};
+export type Workspace = {documents:Document[];products:Product[];audit:Audit[];mode:'synthetic'|'private'|'live';sessionId?:string;hubId?:string;readOnly?:boolean;catalogExample?:boolean;catalogVersion?:string|null;catalogUnchanged?:boolean};
 const nullableText=z.string().nullable();
 // Normalized coordinates in the uploaded image after EXIF rotation. Keep marks
 // independent of rows so a neighboring-row assignment can be checked in code.
