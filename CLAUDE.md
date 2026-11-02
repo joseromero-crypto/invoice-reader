@@ -63,6 +63,10 @@ The full per-row report is in `private/lean-bench/sonnet-v2/REPORT.md`.
 - Test the 7 older photos in `private/invoices/` (Bimbo receipts lying on top of a Calii sheet, Sigma). Add them to the bench with answer keys.
 - Timed real-receiver test at one hub.
 
+## Accounts
+
+Google sign-in, @calii.com only: first sign-in auto-joins as receiver with all active hubs (`server/auth.ts`). Each read is tied to its account (`extraction_jobs.requested_by` + `estimated_cost_usd`); the per-account usage query is in README.
+
 ## Visual design
 
 Calii theme v1 (same as Sorting Hub): white page, grey surfaces, Calii teal #00C3B3, Plus Jakarta Sans. Tokens and `c-` components live in `src/calii-theme.css`; the app's own classes in `src/app.css` use only those tokens. Rules: no other hues (attention = black pill/highlight, never amber), at most one teal action per screen ("Confirmar todos los listos" on the review screen; export buttons are ink), text on teal is ink, sentence case, pill buttons ≥44px. On the review list the Calii item name and Piezas are the biggest things; the printed invoice text is a one-line hint.

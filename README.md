@@ -27,13 +27,19 @@ Apply all SQL files in `supabase/migrations` in filename order for a new databas
 
 AI reads have no app-imposed daily cap or attempt limit; a receiver can retry a failed read. The job lease still prevents processing one job twice. If the Anthropic account runs out of credit, the invoice shows "Error de lectura, favor de capturar directo en Retool y contactar a José…".
 
-Add a receiver: create the user in Supabase → Authentication → Users → Add user (email + password, auto-confirm), then run in the SQL Editor (change the email and hub):
+Sign-in: receivers use **Entrar con Google** with their @calii.com account. On first sign-in they join as a receiver with access to every active hub (`server/auth.ts` `joinWithGoogle`; domain from `ALLOWED_EMAIL_DOMAIN`, default `calii.com`). Any other Google account is refused with "Usa tu cuenta de Calii (@calii.com)…". Email/password stays available for admins. Hubs added later are not assigned to existing receivers automatically.
+
+Setup (once): Google Cloud console → APIs & Services → Credentials → OAuth client ID (Web), authorized redirect URI `https://<project>.supabase.co/auth/v1/callback`; Supabase → Authentication → Sign In / Providers → Google: enable, paste client ID and secret; Supabase → Authentication → URL Configuration: Site URL = the Netlify URL, and add it to Redirect URLs.
+
+Usage per account (SQL Editor):
 
 ```sql
-insert into members(org_id,user_id,role)
-select o.id,u.id,'receiver' from organizations o,auth.users u where u.email='receptor@calii.com';
-insert into hub_members(org_id,hub_id,user_id)
-select h.org_id,h.id,u.id from hubs h,auth.users u where h.name='MH Cumbres' and u.email='receptor@calii.com';
+select u.email, count(*) as lecturas, round(sum(j.estimated_cost_usd),2) as usd,
+       sum(coalesce((j.usage->>'input_tokens')::int,0)+coalesce((j.usage->>'output_tokens')::int,0)) as tokens,
+       max(j.created_at) as ultima
+from extraction_jobs j join auth.users u on u.id = j.requested_by
+where j.created_at > now() - interval '30 days'
+group by u.email order by usd desc;
 ```
 
 See [integration and hosted acceptance](docs/INTEGRATION.md) for the complete checklist. A successful build or accepted background dispatch is not proof of a completed extraction.
