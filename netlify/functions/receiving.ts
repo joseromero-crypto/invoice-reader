@@ -5,6 +5,7 @@ import {authorize,check,HttpError,failure} from '../../server/auth';
 import {requireHub,listHubs} from '../../server/hubs';
 import {loadWorkspace} from '../../server/workspace';
 import {rematchDocument} from '../../server/rematch';
+import {mappingKeys} from '../../lean/match.ts';
 const uuid=z.string().uuid();
 const Input=z.discriminatedUnion('action',[
  z.object({action:z.literal('hubs')}),z.object({action:z.literal('history'),hubId:uuid,before:z.object({at:z.string().datetime({offset:true}),id:uuid}).optional()}),z.object({action:z.literal('create'),hubId:uuid}),z.object({action:z.literal('latest'),hubId:uuid}),z.object({action:z.literal('load'),sessionId:uuid}),
@@ -14,6 +15,7 @@ const Input=z.discriminatedUnion('action',[
  z.object({action:z.literal('confirm-batch'),sessionId:uuid,documentId:uuid,rows:z.array(z.object({rowId:uuid,productId:z.string(),quantity:z.number().int().nonnegative().max(1000000),revision:z.number().int().nonnegative()})).min(1).max(500)}),
  z.object({action:z.literal('page'),sessionId:uuid,documentId:uuid,objectPath:z.string(),hash:z.string().regex(/^[a-f0-9]{64}$/)}),
  z.object({action:z.literal('extract'),sessionId:uuid,documentId:uuid}),
+ z.object({action:z.literal('add-row'),sessionId:uuid,documentId:uuid,productId:z.string(),quantity:z.number().int().nonnegative().max(1000000),description:z.string().trim().max(500).default('')}),
  z.object({action:z.literal('snapshot'),sessionId:uuid,partial:z.boolean()}),
  z.object({action:z.literal('confirm'),sessionId:uuid,documentId:uuid,rowId:uuid,productId:z.string(),quantity:z.number().int().nonnegative().max(1000000),identityChecked:z.literal(true),saveMapping:z.boolean(),corrections:CorrectionsSchema.default({}),revision:z.number().int().nonnegative()})]);
 export default async function handler(request:Request){
@@ -46,7 +48,27 @@ export default async function handler(request:Request){
  check(await db.rpc('confirm_receiving_batch',{p_actor:userId,p_org:orgId,p_document:b.documentId,p_rows:batch}));return Response.json({ok:true});}
  if(b.action==='confirm'){
  const product=check(await db.from('products').select('id').eq('org_id',orgId).eq('external_id',b.productId).maybeSingle());if(!product)throw new HttpError(404,'Product not found');
- check(await db.rpc('confirm_receiving_row',{p_actor:userId,p_org:orgId,p_document:b.documentId,p_row:b.rowId,p_product:product.id,p_quantity:b.quantity,p_identity:b.identityChecked,p_mapping:b.saveMapping,p_corrections:b.corrections,p_expected_revision:b.revision}))!;return Response.json({ok:true});
+ const before=check(await db.from('invoice_rows').select('raw_source,review').eq('org_id',orgId).eq('document_id',b.documentId).eq('id',b.rowId).maybeSingle());if(!before)throw new HttpError(404,'Row not found');
+ check(await db.rpc('confirm_receiving_row',{p_actor:userId,p_org:orgId,p_document:b.documentId,p_row:b.rowId,p_product:product.id,p_quantity:b.quantity,p_identity:b.identityChecked,p_mapping:false,p_corrections:b.corrections,p_expected_revision:b.revision}))!;
+ // Learn supplier code → Calii item whenever the receiver picked or changed the product; match() uses it next time.
+ const supplier=before.review.mappingSupplier,keys=before.review.manual||!supplier?[]:mappingKeys(before.raw_source);
+ if(keys.length&&(b.saveMapping||before.review.product?.id!==b.productId)){
+ check(await db.from('supplier_mappings').upsert(keys.map(k=>({org_id:orgId,supplier,supplier_sku:k,product_id:product.id,confirmed_by:userId,confirmed_at:new Date().toISOString()})),{onConflict:'org_id,supplier,supplier_sku'}));
+ check(await db.from('review_events').insert({org_id:orgId,actor:userId,row_id:b.rowId,action:'Mapeo de proveedor guardado',after_value:{supplier,codes:keys,product_id:product.id}}));
+ }
+ return Response.json({ok:true});
+ }
+ if(b.action==='add-row'){
+ const product=check(await db.from('products').select('id,external_id,sku,name,supplier,supplier_sku,barcode,unit').eq('org_id',orgId).eq('external_id',b.productId).maybeSingle());if(!product)throw new HttpError(404,'Product not found');
+ const job=check(await db.from('extraction_jobs').select('status').eq('org_id',orgId).eq('document_id',b.documentId).maybeSingle());if(job&&['queued','processing'].includes(job.status))throw new HttpError(409,'Espera a que termine la lectura.');
+ // Manual rows start at 1001 so a later re-read never collides with them.
+ const last=check(await db.from('invoice_rows').select('source_row').eq('org_id',orgId).eq('document_id',b.documentId).order('source_row',{ascending:false}).limit(1).maybeSingle());
+ const sourceRow=Math.max(1000,last?.source_row??0)+1,description=b.description||'Agregado a mano';
+ const review={sourceRow,sourcePage:null,description,supplierSku:null,barcode:null,billedQuantity:null,billedUnit:null,price:null,amount:null,proposedQuantity:b.quantity,actualQuantity:null,confirmedQuantity:null,product:{id:product.external_id,sku:product.sku,name:product.name,supplier:product.supplier,supplierSku:product.supplier_sku,barcode:product.barcode,unit:product.unit},candidates:[],evidence:[],flags:['Renglón agregado a mano'],resolvedFlags:[],conversion:'',confirmed:false,status:'review',reasons:['Renglón agregado a mano'],manual:true};
+ const row=check(await db.from('invoice_rows').insert({org_id:orgId,document_id:b.documentId,source_row:sourceRow,raw_source:{manual:true,description},review}).select('id').single())!;
+ check(await db.from('invoice_rows').update({review:{...review,id:row.id}}).eq('org_id',orgId).eq('id',row.id));
+ check(await db.rpc('confirm_receiving_row',{p_actor:userId,p_org:orgId,p_document:b.documentId,p_row:row.id,p_product:product.id,p_quantity:b.quantity,p_identity:true,p_mapping:false,p_corrections:{},p_expected_revision:0}));
+ return Response.json({ok:true,rowId:row.id});
  }
  if(b.action==='page'){
  if(!b.objectPath.startsWith(`${orgId}/${b.documentId}/`)||b.objectPath.split('/').length!==3||b.objectPath.split('/')[2]!==`${b.hash}.${b.objectPath.endsWith('.png')?'png':'jpg'}`)throw new HttpError(400,'Invalid object reference');
@@ -57,12 +79,12 @@ export default async function handler(request:Request){
  check(await db.from('source_pages').insert({org_id:orgId,document_id:b.documentId,object_path:b.objectPath,content_hash:b.hash,page_number:(count??0)+1}))!;return Response.json({ok:true});
  }
  if(b.action==='extract'){
- if(!process.env.ANTHROPIC_API_KEY||!process.env.ANTHROPIC_MODEL)throw new HttpError(503,'Configure ANTHROPIC_API_KEY and ANTHROPIC_MODEL before extraction');
+ if(!process.env.ANTHROPIC_API_KEY)throw new HttpError(503,'Configure ANTHROPIC_API_KEY before extraction');
  const pages=check(await db.from('source_pages').select('id').eq('org_id',orgId).eq('document_id',b.documentId))!;if(!pages.length)throw new HttpError(400,'Upload at least one page');
  let job=check(await db.from('extraction_jobs').select('*').eq('org_id',orgId).eq('document_id',b.documentId).maybeSingle());
  if(job?.status==='complete')return Response.json({jobId:job.id,status:'complete'});
  if(job?.status==='processing')return Response.json({jobId:job.id,status:job.status},{status:202});
- if(job&&job.status!=='queued'){if(job.attempts>=2)throw new HttpError(409,'Retry limit reached. Contact an administrator before another paid attempt.');job=check(await db.from('extraction_jobs').update({status:'queued',error:null,requested_by:userId}).eq('org_id',orgId).eq('id',job.id).in('status',['failed','uncertain']).select().single())!;}
+ if(job&&job.status!=='queued'){job=check(await db.from('extraction_jobs').update({status:'queued',error:null,requested_by:userId}).eq('org_id',orgId).eq('id',job.id).in('status',['failed','uncertain']).select().single())!;}
  else if(!job){const created=await db.from('extraction_jobs').insert({org_id:orgId,document_id:b.documentId,requested_by:userId}).select().single();if(created.error?.code==='23505')return Response.json({status:'queued'},{status:202});job=check(created)!;}
  const endpoint=new URL('/.netlify/functions/extract-background',request.url);
  const dispatched=await fetch(endpoint,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({jobId:job.id})});

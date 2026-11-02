@@ -79,20 +79,6 @@ it('v3 refuses malformed/missing ownership, unknown table IDs, duplicate observa
 });
 
 
-import {createElement} from 'react';
-import {renderToStaticMarkup} from 'react-dom/server';
-import Review from '../src/Review';
-it('receiving UI retains printed columns, shows a clear proposal and requires physical attestation',()=>{
- const row=buildInvoiceRows(readV3(encodePrintedTablesV3(source())),[product])[0];
- const html=renderToStaticMarkup(createElement(Review,{row,products:[product],onClose:()=>{},onConfirm:async()=>{throw Error('No physical approval in test');},imageSrc:'',mode:'private'}));
- expect(html).toContain('<dt>PIEZAS</dt><dd>024</dd>');expect(html).toContain('<dt>CAJAS</dt><dd>02</dd>');expect(html).toMatch(/id="actual-pieces"[^>]+value="24"/);expect(html).toContain('contra la mercancía recibida');expect(html).toMatch(/class="primary" disabled=""/);
-});
-it('receiving UI leaves a doubtful count blank and renders the original billed source separately',()=>{
- const input=source();input.rows[0].handwriting={kind:'other',text:'0?',ownership:'row',candidateRows:[1]};
- const row=buildInvoiceRows(readV3(encodePrintedTablesV3(input)),[product])[0];
- const html=renderToStaticMarkup(createElement(Review,{row,products:[product],onClose:()=>{},onConfirm:async()=>{throw Error('No physical approval in test');},imageSrc:'',mode:'private'}));
- expect(html).toContain('Cantidad recibida por indicar');expect(html).toMatch(/id="actual-pieces"[^>]+value=""/);expect(html).toContain('24');expect(row.billedQuantity).toBe(24);expect(row.confirmed).toBe(false);
-});
 
 
 it('requires source-key review for a contradictory key despite an exact barcode, keeping the count usable and raw key intact',()=>{
@@ -103,11 +89,6 @@ it('requires source-key review for a contradictory key despite an exact barcode,
 });
 
 
-it('shows both ambiguous printed columns without calling legible counts illegible or repeating unit/count warnings',()=>{
- const input=source();input.tables[0].quantityHeaders=['CANTIDAD (CAJAS - ZZ)','CANTIDAD (CAJAS - EA)'];input.rows[0].printedQuantities=['4.00','4.00'];input.rows[0].printedUnit=null;input.rows[0].fieldUncertainties=[{field:'unit',reason:'Sin columna U.M. separada visible'}];
- const row=buildInvoiceRows(readV3(encodePrintedTablesV3(input)),[product])[0];expect(row.flags.filter(f=>f.startsWith('quantity:'))).toHaveLength(1);expect(row.flags).not.toContain('Cantidad ilegible');expect(row.conversion).not.toContain('ilegible');expect(row.flags.some(f=>f.startsWith('Cantidad facturada pendiente: unidad'))).toBe(false);expect(initialReceivedQuantity(row)).toBe('');
- const html=renderToStaticMarkup(createElement(Review,{row,products:[product],onClose:()=>{},onConfirm:async()=>{throw Error('No physical approval in test');},imageSrc:'',mode:'private'}));expect(html).toContain('<dt>CANTIDAD (CAJAS - ZZ)</dt><dd>4.00</dd>');expect(html).toContain('<dt>CANTIDAD (CAJAS - EA)</dt><dd>4.00</dd>');expect(html).toContain('Sin seleccionar');
-});
 
 
 import {billedQuantityDisplay} from '../shared/quantity-review';

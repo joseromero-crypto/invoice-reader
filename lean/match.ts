@@ -41,6 +41,22 @@ export interface MatchResult {
 // Confirmed supplier code → Calii id mappings learned from past receipts (key: `${supplier}|${code}`).
 export type Mappings = Map<string, string>;
 
+const clean = (v: unknown) => { const s = String(v ?? '').trim(); return s === '-' || s === "'-" ? '' : s; };
+// One Retool masterview row (CSV export, or products.raw in the database) → CatalogItem.
+export function catalogItem(r: Record<string, unknown>): CatalogItem {
+  const n = parseFloat(clean(r['Peso neto o piezas (por unidad de compra)']).replace(',', '.'));
+  return {
+    id: clean(r['id']),
+    name: clean(r['Item']),
+    sku: clean(r['sku']),
+    supplier: clean(r['Proveedor']),
+    supplierSku: clean(r['SKU Proveedor']),
+    barcodes: clean(r['Código de Barras']).split(/[,;/\s]+/).filter(Boolean),
+    purchaseUnit: clean(r['Unidad de compra']),
+    perPurchaseUnit: Number.isFinite(n) && n > 0 ? n : null,
+  };
+}
+
 const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 export function normCode(v: string): string {
   const s = String(v ?? '').toUpperCase().replace(/[^0-9A-Z]/g, '');
@@ -50,7 +66,7 @@ const isBarcodeHeader = (h: string) => /BARRA|EAN|UPC|GTIN/i.test(h);
 const isFiscal = (h: string, v: string) =>
   /CVE ?PROD|PROD\.? ?SERV|\bSAT\b|CLAVE ?PROD|CLAVE ?SAT|OBJETO/i.test(h) || /^5\d{7}$/.test(v.replace(/\D/g, ''));
 
-function rowCodes(row: TranscribedRow) {
+export function rowCodes(row: TranscribedRow) {
   const barcodes = new Set<string>(), keys = new Set<string>();
   for (const c of row.codes ?? []) {
     const n = normCode(c.value); if (!n) continue;
@@ -62,6 +78,11 @@ function rowCodes(row: TranscribedRow) {
   for (const m of (row.description ?? '').matchAll(/\d{8,14}/g)) if (!/^5\d{7}$/.test(m[0])) barcodes.add(normCode(m[0]));
   return { barcodes: [...barcodes], keys: [...keys] };
 }
+
+// Codes a confirmed mapping is saved under and looked up by (fiscal codes never count).
+export function mappingKeys(row: TranscribedRow): string[] { const c = rowCodes(row); return [...new Set([...c.keys, ...c.barcodes])]; }
+// Supplier name mappings are keyed by: the catalog supplier when detected, else the printed name.
+export const mappingSupplier = (r: MatchResult, t: Transcription) => r.supplier ?? t.supplier?.trim() ?? '';
 
 // ---------- description similarity (fallback suggestions only) ----------
 function tokens(s: string): Set<string> {
@@ -85,7 +106,7 @@ const isCaseHeader = (h: string) => /CAJ|\bCJ\b|BULTO|\bCS\b/i.test(h);
 const pieceUnit = (u: string | null) => !!u && /^(PZ|PZA|PZAS|PIEZA|PIEZAS|PIEZA\(S\)|EA|H87|UNIDAD|UN|UND)$/i.test(u.trim());
 const caseUnit = (u: string | null) => !!u && /CAJ|^CJ$|XBX|^CS$/i.test(u.trim());
 
-function quantity(row: TranscribedRow, cols: string[], item: CatalogItem | null): { q: number | null; basis: string; ok: boolean; note?: string } {
+export function quantity(row: TranscribedRow, cols: string[], item: CatalogItem | null): { q: number | null; basis: string; ok: boolean; note?: string } {
   const vals = cols.map((_, i) => num(row.quantities?.[i]));
   const pi = cols.findIndex((h, i) => isPieceHeader(h) && vals[i] != null);
   const ci = cols.findIndex((h, i) => isCaseHeader(h) && vals[i] != null);
@@ -148,7 +169,8 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
     const { barcodes, keys } = codes[i];
     let item: CatalogItem | null = null, matchedBy: Proposal['matchedBy'] = null;
 
-    for (const k of keys) { const id = mappings.get(`${supplier}|${k}`); const hit = id && catalog.find(c => c.id === id); if (hit) { item = hit; matchedBy = 'mapping'; break; } }
+    const mapSupplier = supplier ?? t.supplier?.trim() ?? '';
+    for (const k of [...keys, ...barcodes]) { const id = mappings.get(`${mapSupplier}|${k}`); const hit = id && catalog.find(c => c.id === id); if (hit) { item = hit; matchedBy = 'mapping'; break; } }
     const bcHits = [...new Set(barcodes.flatMap(b => byBarcode.get(b) ?? []))];
     let skuHits = [...new Set(keys.flatMap(k => bySku.get(k) ?? []))];
     // Distributors (e.g. Alpura routes) also deliver other brands: fall back to the whole catalog.

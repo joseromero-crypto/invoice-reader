@@ -1,7 +1,4 @@
 import {it,expect} from 'vitest';
-import {createElement} from 'react';
-import {renderToStaticMarkup} from 'react-dom/server';
-import Review from '../src/Review';
 import {ExtractionSchema,confirmRow,exportCsv,type Document,type Product,type Row} from '../shared/domain';
 import {quantityAlignments} from '../shared/quantity-alignment';
 import {buildInvoiceRows} from '../server/match-extraction';
@@ -65,11 +62,6 @@ it('keeps handwritten safeguards alongside reliable billed geometry',()=>{
 it('keeps legacy results compatible and field-local quantity uncertainty requires empty manual entry',()=>{
  const raw=fixture();delete raw.quantityEvidence;expect(buildInvoiceRows(raw,products).every(r=>r.confirmed)).toBe(true);
  raw.rows[1].fieldUncertainties=[{field:'quantity',reason:'Neighbor alignment uncertain'}];const rows=buildInvoiceRows(raw,products);expect(initialReceivedQuantity(rows[1])).toBe('');expect(rows[1].confirmed).toBe(false);expect(rows[4].confirmed).toBe(true);
-});
-it('shows alignment-specific review, keeps the provisional product replaceable and audits an explicit physical zero',()=>{
- const raw=fixture();raw.rows[1].quantity=2;const row=buildInvoiceRows(raw,products)[1];expect(quantityReviewMessage(row)).toContain('cantidad facturada');expect(quantityReviewMessage(row)).not.toContain('anotaciones manuales');
- const html=renderToStaticMarkup(createElement(Review,{row,products,onClose:()=>{},onConfirm:async()=>{},imageSrc:'',mode:'synthetic'}));expect(html).toContain('asociación por verificar');expect(html).toMatch(/id="actual-pieces"[^>]*value=""/);expect(html).toContain('Buscar otro artículo');
- const approved=confirmRow(row,products[3],0,true);expect(approved.billedQuantity).toBe(2);expect(approved.actualQuantity).toBe(0);expect(approved.product).toEqual(products[3]);expect(approved.resolvedFlags.length).toBeGreaterThan(0);expect(exportCsv([doc([approved])]).csv).toContain('"0","C3"');
 });
 
 it('keeps a known handwriting conflict classified as receipt uncertainty',()=>{

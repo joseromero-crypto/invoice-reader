@@ -11,6 +11,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { transcribe, type ReadResult } from '../lean/transcribe.ts';
+import { prepareImage } from '../lean/image.ts';
 import { match, normCode, type Proposal } from '../lean/match.ts';
 import { loadCatalogCsv } from '../lean/catalog.ts';
 
@@ -77,7 +78,7 @@ async function one(inv: typeof invoices[number]) {
     read = JSON.parse(readFileSync(file, 'utf8'));
   } else {
     if (spend.totalUsd >= budget) { console.log(`#${inv.n}: skipped, budget $${budget} reached`); return null; }
-    const images = inv.photos.map(p => ({ mediaType: 'image/jpeg' as const, base64: readFileSync(p).toString('base64') }));
+    const images = await Promise.all(inv.photos.map(p => prepareImage(readFileSync(p)))); // same prep as server/extract.ts
     read = { ...(await transcribe(process.env.ANTHROPIC_API_KEY!, model, images)), model };
     spend.totalUsd += read.costUsd; spend.calls.push({ run, invoice: inv.n, model, usd: read.costUsd, usage: read.usage, at: new Date().toISOString() }); saveSpend();
     writeFileSync(file, JSON.stringify(read, null, 2));

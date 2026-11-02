@@ -45,19 +45,16 @@ The full per-row report is in `private/lean-bench/sonnet-v2/REPORT.md`.
 
 ## Plan — what's left
 
-**Phase 2 — wire `lean/` into the app (next):**
-- `server/extract.ts`: load the document's photos from Storage, downscale with `sharp` to ≤2576 px on the long edge (JPEG q85), call `transcribe()`. Store the transcription in `extraction_jobs.raw_result`, plus model, usage and cost.
-- Build `CatalogItem[]` from `products` (`raw` holds the full Retool row, including *Unidad de compra* and *Peso neto o piezas*). Build mappings from `supplier_mappings`. Run `match()`.
-- Write one `invoice_rows` row per proposal (`raw_source` = transcribed row, `review` = proposal). Document `warnings` = `MatchResult.warnings`.
-- Remove the `invoice-spend` admission and its reservation logic from the worker. Keep auth/org checks, file type/size checks and duplicate-photo detection.
+**Phases 2–3 — done (Nov 2), code-complete; live Netlify/Supabase run still pending.**
+- Live path: `netlify/functions/extract-background.ts` → `server/extract.ts`: photos from Storage → `lean/image.ts` (`prepareImage`: EXIF rotate, ≤2576 px, JPEG q85; the bench uses the same function) → `transcribe()` → `match()` with `CatalogItem`s from `products.raw` (`server/workspace.ts` `asCatalogItem`) and `supplier_mappings` (`server/rematch.ts` `leanMappings`) → `finish_extraction`. `server/lean-rows.ts` turns each proposal into an `invoice_rows` row: `raw_source` = transcribed row, `review` = the proposal in the existing `Row` shape plus `status`, `reasons`, `columns`, `mappingSupplier`. `extraction_jobs.raw_result` = `{supplier, reference, date, warnings, transcription, ...}` (finish_extraction copies supplier/reference/date/warnings onto the document). No spend admission, no attempt fence; the lease/claim token stays.
+- Mappings: saved by `receiving.ts` `confirm` whenever the confirmed product differs from the proposal. Key = `mappingSupplier` (catalog supplier, else printed name) + every non-fiscal code on the row (`mappingKeys`). `match()` looks mappings up by codes and barcodes.
+- Review screen: `src/Review.tsx` (Listo / Revisar / Tachado, inline picker with candidates first, Piezas recalculated with `quantity()` from `lean/match.ts`), "Confirmar todos los listos" (blocked while a document warning isn't marked "Entendido"), "Agregar renglón" (`add-row`, source_row ≥ 1001, confirmed immediately). Export copies confirmed rows only.
+- "Actualizar coincidencias" re-runs `match()` on the saved transcription for free.
+- Dev: "Cargar ensayo privado" (vite, local only) shows the saved `private/lean-bench/sonnet-v2` reads matched with the current code (`PRIVATE_LEAN_RUN` picks another run).
+- Migration `20261102120000_lean_reader_no_attempt_fence.sql` (removes the 2-attempt fence and the daily-usage counter from `claim_extraction_v1`) is written but **not applied**. Until it is, a document can be retried only once.
+- Learned: the bench photos are 4096×3072 and the API already downscaled them, so ≤2576 px gives the same reads at the same cost (invoices 4, 10, 12 re-run as `sonnet-v2-2576`: 69/69 quantities, same identity).
 
-**Phase 3 — review screen (`src/Review.tsx`):**
-- Three groups: Listo (ok), Revisar (review, with reasons), Tachado (excluded, collapsed).
-- Per row: photo snippet link, printed codes/description/quantities, product picker (catalog search, candidates first), pieces input.
-- "Confirmar todos los listos" button, disabled while a document warning is open. "Agregar renglón" for anything the reader missed, or a failed read.
-- On confirm: upsert `supplier_mappings` for rows the user picked; export/copy stays as is.
-
-**Phase 4 — delete the old reader** once Phases 2–3 work end to end. Remove `server/invoice-*.ts` (except whatever Phase 2 still imports), `shared/annotation-association.ts`, `shared/quantity-alignment.ts`, `shared/printed-reading.ts`, `shared/basic-reading.ts`, the old paid/eval scripts (`scripts/basic-*`, `smoke-invoice.ts`, `evaluate-*`, `verify-*`, `validate-basic-history.ts`) and their tests. Keep auth, hubs, catalog upload, domain/export.
+**Phase 4 — delete the old reader** once Phases 2–3 work end to end. Remove `server/invoice-*.ts` (except whatever Phase 2 still imports), `shared/annotation-association.ts`, `shared/quantity-alignment.ts`, `shared/printed-reading.ts`, `shared/basic-reading.ts`, the old paid/eval scripts (`scripts/basic-*`, `smoke-invoice.ts`, `evaluate-*`, `verify-*`, `validate-basic-history.ts`) and their tests. Nothing live imports them any more; also unused now: `server/match-extraction.ts`, `server/extraction-failure.ts`, `shared/receiving-policy.ts`, `shared/quantity-review.ts`, `shared/matching.ts` (except `supplierKey`, used by `shared/catalog.ts`). Keep auth, hubs, catalog upload, domain/export.
 
 **Later:**
 - Test the 7 older photos in `private/invoices/` (Bimbo receipts lying on top of a Calii sheet, Sigma). Add them to the bench with answer keys.

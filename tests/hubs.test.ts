@@ -104,8 +104,7 @@ it('keeps policy helpers outside the REST schema and unavailable to anonymous ca
  expect((await asUser(userA,'select name from hubs')).rows.map(h=>h.name)).toEqual(['MH Contry']);
 });
 
-it('admits extraction beyond the former daily cap while preserving accounting, fencing and authorization',async()=>{
- await db.query('insert into ai_daily_usage(org_id,day,reserved_calls) values($1,current_date,1001) on conflict(org_id,day) do update set reserved_calls=1001',[org]);
+it('claims a job once under a lease, without a daily cap or attempt fence, and keeps authorization',async()=>{
  const createJob=async()=>{
  const doc=(await db.query<any>('insert into documents(org_id,session_id) values($1,$2) returning id',[org,sessionA])).rows[0].id;
  return (await db.query<any>('insert into extraction_jobs(org_id,document_id,requested_by) values($1,$2,$3) returning id',[org,doc,userA])).rows[0].id;
@@ -116,10 +115,8 @@ it('admits extraction beyond the former daily cap while preserving accounting, f
  const claim=(await db.query<any>('select claim_extraction($1,$2,20) as claim',[first,userA])).rows[0].claim;
  expect(claim.status).toBe('processing');expect(claim.attempts).toBe(1);expect(claim.claim_token).toBeTruthy();expect(claim.lease_until).toBeTruthy();
  expect((await db.query<any>('select claim_extraction($1,$2,20) as claim',[first,userA])).rows[0].claim).toBeNull();
- const second=await createJob();expect((await db.query<any>('select claim_extraction($1,$2,null) as claim',[second,userA])).rows[0].claim.status).toBe('processing');
- expect((await db.query<any>('select reserved_calls from ai_daily_usage where org_id=$1 and day=current_date',[org])).rows[0].reserved_calls).toBe(1003);
- await db.query("update extraction_jobs set status='queued',attempts=2 where id=$1",[second]);
- await expect(db.query('select claim_extraction($1,$2,null)',[second,userA])).rejects.toThrow(/Retry limit reached/);
- expect((await db.query<any>('select reserved_calls from ai_daily_usage where org_id=$1 and day=current_date',[org])).rows[0].reserved_calls).toBe(1003);
+ // An explicit retry after failures is always allowed (no 2-attempt fence).
+ await db.query("update extraction_jobs set status='queued',attempts=5 where id=$1",[first]);
+ expect((await db.query<any>('select claim_extraction($1,$2,null) as claim',[first,userA])).rows[0].claim.attempts).toBe(6);
  expect((await db.query<any>("select has_function_privilege('service_role','public.claim_extraction_v1(uuid,uuid,integer)','execute') as direct")).rows[0].direct).toBe(false);
 });
