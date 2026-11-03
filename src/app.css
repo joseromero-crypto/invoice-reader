@@ -267,4 +267,5 @@ td small{display:block;font-size:var(--fs-sm);color:var(--c-muted)}
  .simple-export p{width:100%}
  .simple-export button{flex:1}
 }
+.sign-in-card{display:flex;flex-direction:column;align-items:flex-start;gap:var(--s-3);margin:var(--s-6) 0;padding:var(--s-5);border-radius:var(--r-xl);background:var(--c-surface)}
 .hubs-loading{display:flex;align-items:center;gap:var(--s-2);margin:var(--s-6) 0}
