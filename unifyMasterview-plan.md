@@ -1,6 +1,6 @@
 # Unify Masterview — one catalog for Armado CH, Sorting Hub, MH Recibo and Invoice Reader
 
-Status: plan, not built. Written 2026-11-03 from the code in the four repos and the all-cities export
+Status: Phase 1 done 2026-11-05; the rest is not built. Written 2026-11-03 from the code in the four repos and the all-cities export
 (`table-data - 2026-11-03T101825.372.csv`, which had the wrong column set; see §0).
 
 This file lives in all four repos (armado-CH, sorting-hub, mh-recibo, calii-invoice-reader), as
@@ -138,6 +138,34 @@ the other three.
 ---
 
 ## Phase 1: Invoice Reader → armado-ch Supabase project (repo `calii-invoice-reader`)
+
+**Result: done 2026-11-05.** The steps below are kept as the record of what was planned.
+
+- **Where it runs:** `.env.local` and the Netlify site (`https://invoicereader.joseromero.co`) both point to
+  `uuqqtksxlgkztenojufm`. The old project is untouched. Don't delete it until Jose says so.
+- **Collisions:** none. Nothing belonging to Armado CH, Sorting Hub or MH Recibo was changed.
+- **What was applied:** `supabase/shared-project/setup.sql`, generated from `supabase/migrations`, including the
+  attempt-fence migration and explicit grants on every table (`authenticated` read, `service_role` read/write, no
+  `anon`).
+- **What's in the project now:** 1 organization (same id as the old project), 9 hubs, 4,896 products from the
+  2026-11-04 Retool export, 11 `supplier_mappings` (all linked to imported products), Jose as admin.
+  `quantity_conversions` had 0 rows, so there was nothing to carry.
+- **Checks passed:** bench `--replay` 238/238 quantities, 212 identity, 201 bulk-confirmable; 236/236 unit tests.
+  - Local read through `netlify functions:serve`: LALA CWB-02767766, 15 rows, $0.027.
+  - Live read on the Netlify site: Mission Foods 5004590079, 3 rows, $0.018.
+- **Env names differ from step 6:** the app uses `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `VITE_SUPABASE_URL` and
+  `VITE_SUPABASE_PUBLISHABLE_KEY`. On Netlify, values are per deploy context, and `VITE_*` needs a redeploy.
+- **What Phase 2 needs to know:**
+  - The database is shared: never write a migration that loops over every function or table in `public`. An
+    unscoped loop in `20261028160041_private_rls_helpers.sql` would have rewritten MH Recibo's `rec_alert_*`
+    functions, so it now lists Invoice Reader's functions by name.
+  - armado-ch limits API calls to a few seconds, so `import_masterview` (120 s) and `read_catalog_snapshot` (60 s,
+    ~11 s measured) carry their own `statement_timeout`.
+  - A Masterview import took about 29 s locally. That may be too long for a synchronous Netlify function and hasn't
+    been tried on the live site, so the importer must handle it.
+  - `import_masterview` upserts on `(org_id, external_id)`, so product ids survive a re-import.
+  - `server/auth.ts` requires exactly one organization and deletes non-@calii Google logins. That's harmless today
+    because no other app uses Supabase Auth, but it matters if one starts to.
 
 **Check first, then act.** On 2026-11-03, `.env.local` still pointed to `mudavlghievjyddtjudp` (its own
 project).
