@@ -1,6 +1,6 @@
 # Unify Masterview — one catalog for Armado CH, Sorting Hub, MH Recibo and Invoice Reader
 
-Status: Phases 1, 2 and 3 done 2026-11-05, and the first real upload is published. Phase 4 (the readers) is next; until then no other app reads `masterview/`. Written 2026-11-03 from the code in the four repos and the all-cities export
+Status: Phases 1, 2 and 3 done 2026-11-05, and the first real upload is published. Phases 4.1, 4.2 and 4.3, and the three static apps' parts of Phase 6, are done and committed, and go live when Jose pushes. Phase 4.4 is next; until then Invoice Reader doesn't read `masterview/`. Written 2026-11-03 from the code in the four repos and the all-cities export
 (`table-data - 2026-11-03T101825.372.csv`, which had the wrong column set; see §0).
 
 This file lives in all four repos (armado-CH, sorting-hub, mh-recibo, calii-invoice-reader), as
@@ -474,10 +474,10 @@ const MV_BUCKET='masterview';
 - Read `hubCities` from the JSON. **Don't hard-code it.** If it's missing (old JSON, or a fallback
   copy), treat the city as unknown and skip any city logic.
 - Always read entries through `imgUrl()` / `imgName()`, since barcode entries are objects now.
-  - Copy Sorting Hub's helpers (sorting-hub/index.html lines 352–404) where an app reads entries as
-    plain strings.
-- `alt` lookup: `pickEntry(bcKey, city)` returns the `alt` entry whose `c` includes `city`, else
-  `map[bcKey]`.
+  - Copy Sorting Hub's helpers (`imgUrl`, `imgName`, `pickEntry` in sorting-hub/index.html) where an app
+    reads entries as plain strings.
+- `alt` lookup: `pickEntry(bcKey, city)` returns `map[bcKey]` if its `c` includes `city`, else the `alt`
+  entry whose `c` includes `city`, else `map[bcKey]`. Check `map` first: see the 4.1 result.
 - Each repo:
   - bump `CACHE_NAME` in `sw.js`
   - test on localhost with write helpers stubbed (local runs write to prod)
@@ -485,6 +485,32 @@ const MV_BUCKET='masterview';
   - **don't push from the terminal**; Jose pushes with GitHub Desktop
 
 ### 4.1 Sorting Hub (repo `sorting-hub`)
+
+**Result: done 2026-11-05, committed, not pushed.** The steps below are kept as the record of what was planned.
+
+- **Live file checked first** (version `0e330dae`): `map` has 10,563 keys (5,081 barcodes, 5,482 names), `alt` 48 keys with one entry
+  each, `hubCities` 8 hubs, `cityUpdatedAt` 4 cities. No `url: null` entries yet, and `version.txt` equals `updatedAt`.
+- **Differs from the plan:**
+  - `alt` is not limited to cities `map` doesn't cover. 3 barcodes repeated inside a city are in both: 7501055363346 (Saltillo, CDMX),
+    7501005113373 (Saltillo, CDMX) and 7501055354672 (Guadalajara). Those stay on the `map` entry, so `pickEntry` checks `map` first.
+    Taking `alt` first would show the wrong SKU there. The other three apps need the same order.
+  - ZYZ063 (75041663) is CDMX and Guadalajara, not CDMX-only, and it's in Condesa's and Zapopan's sorting files.
+  - Masterview is cached in Cache Storage (`calii-masterview`), not localStorage. About 2.03M characters plus a 0.39M sorting cache sits
+    right at iPhone Safari's localStorage limit (about 2.5M, from memory, not measured here). `sw.js` must not delete that cache on activate.
+  - A failed `version.txt` used to skip the cache and go to the bundled file. The order is now: `masterview/`, last cached Masterview
+    whatever its version, old `sorting-hub/imagedb/`, bundled. MH Recibo and Armado CH should check for the same gap.
+  - The bundled `imagedb.json` is a full copy of `latest.json`, so the offline floor has `alt`, `hubCities` and the pill too.
+  - `masterviewReduce` went with `handleMasterviewFile`, since nothing else used it.
+- **Checks passed, on localhost against the live bucket, with write helpers stubbed (0 writes):**
+  - Condesa + 75041663: image, name, position O-1-4, no pill. Zapopan the same with G-4-2.
+  - Contry + 75041663: image, name, "No se vende en Monterrey", "No está en el sorting de MH Contry".
+  - Monterrey barcodes at Contry, in the file or not: no pill. Unknown barcode: no pill, no name.
+  - Kinder Bueno 8005276 at Condesa: "No se vende en CDMX". `alt` hit 7501005113373 at Guadalajara: ZHA456. The 3 repeated barcodes: `map` SKU.
+  - No `hubCities`: no pill.
+  - Headless Chrome, network offline and server stopped: the shell came from the service worker and Masterview from the cache (10,563 keys,
+    48 `alt`, 8 hubs), with the pill, the sorting cache and the 05/11 status line all working. With that cache deleted, the bundled file gave
+    the same results. A new `CACHE_NAME` removed the old shell cache and kept `calii-masterview`. The old-imagedb fallback loaded 9,437 keys with no city logic.
+- **Not checked yet:** real phones (Android Chrome, iPhone Safari).
 
 - `loadImageDB` → `masterview/` first.
 - Scan of a barcode that's **not in the hub's sorting file but is in Masterview** (the §3.2 path that
@@ -499,6 +525,36 @@ const MV_BUCKET='masterview';
 
 ### 4.2 MH Recibo (repo `mh-recibo`)
 
+**Result: done 2026-11-05, committed, not pushed.** The steps below are kept as the record of what was planned.
+
+- **Differs from the plan:**
+  - The city line is in the not-in-envío modal ("Este producto no viene en el envío."), not "Código no reconocido". `resolveCode` turns any
+    code with a Masterview name into a product, so a code Masterview knows never reaches "Código no reconocido".
+  - It also shows when that modal opens from a "Sin código" search, because it's checked on the product's barcode.
+  - The old two-bucket fallback was removed here, not kept until Phase 6, so the order is `masterview/`, last cached Masterview whatever
+    its version, bundled.
+  - `mr_imgdb_cache` is removed at the start of every load, not only after a successful `masterview/` read, so a phone that opens offline frees it too.
+  - `hubCity()` reads `INI.hub`, not `S.hub`, because Recepciones shows photos without opening Recibir. `getImgUrl`'s memo key includes the
+    city, or a hub change would show the other city's `alt` photo.
+  - A barcode entry with no `url` now falls through to the name lookup, as in Sorting Hub.
+  - The Inicio line now uses `count` (5,492 productos), not keys / 2.
+  - The loader still accepts the old flat `imagedb.json`: `netlify.toml` caches that file for 30 days, so a phone can hold it for a while. It
+    works without city logic, and only offline on a phone with no cached Masterview. Sorting Hub has the same header. Not changed here.
+- **Checks passed, on localhost in headless Chrome against the live bucket (version `0e330dae`), with `recibo` and `rec_*` faked in memory
+  (0 writes reached Supabase; only GET and HEAD passed):**
+  - First load: `version.txt` + `latest.json`, nothing from the old `imagedb/` folders, 10,563 keys, 48 `alt`, 8 hubs, `calii-masterview`
+    written, old localStorage entry gone. Second load: `version.txt` only.
+  - Kinder Bueno 8005276 at test-hub (`c` is Guadalajara only): image, name and "Este producto no se vende en Monterrey". Same line with CDMX at
+    Condesa, no line at Zapopan.
+  - Monterrey product not in the envío: same modal, no line. Unknown code: "Código no reconocido", unchanged.
+  - `alt` hit 7501005113373 at Zapopan: ZHA456, CRX111 at Contry. The 3 repeated barcodes: `map` SKU. No `hubCities`: no line.
+  - Real flow with the 29/10 Contry envío at test-hub: upload, 104 lines scanned, Kinder received as No esperado, 3 differences answered one by
+    one, closed. Report and `cerrar` event written to the fake backend: 105 lines, 3 differences, 1 no esperado.
+  - Network off, Supabase blocked and local server stopped: shell from the service worker, Masterview from the cache, and a real scan shows the
+    name and the line. With that cache deleted, the bundled file gives the same results. A new `CACHE_NAME` removed the old shell cache and kept
+    `calii-masterview`.
+- **Not checked yet:** real phones (Android Chrome, iPhone Safari).
+
 - `loadImageDB`: `masterview/` first, then the current "newest of `solcitudesarmado` / `sorting-hub`"
   logic as a fallback, then bundled. Remove the fallback in Phase 6.
 - Unknown-code modal: if the code is in Masterview but `c` doesn't include the hub's city, add one
@@ -509,6 +565,36 @@ const MV_BUCKET='masterview';
 - Update CLAUDE.md ("Product photos" line) and HANDOFF.md.
 
 ### 4.3 Armado CH (repo `armado-CH`)
+
+**Result: done 2026-11-05, committed, not pushed.** The steps below are kept as the record of what was planned.
+
+- **Differs from the plan:**
+  - The order is `masterview/`, last cached Masterview whatever its version, bundled. The old `solcitudesarmado/imagedb/` read is gone, not kept as a
+    fallback. `calii_imgdb_cache` is removed at the start of every load, and its step in `trySetLocalStorage`'s eviction went with it.
+  - No city logic: `alt` and `hubCities` are not read, so `pickEntry` and `hubCity` were not copied.
+  - `masterviewReduce` went with the upload. `pickCol` and `normHeader` stay, because Verificar captura uses them.
+  - `detectSuspiciousBarcodes` still only asks whether the key exists, not `imgUrl()`: a known barcode with no image isn't a corrupted barcode.
+  - `imgName()` was copied but nothing calls it yet: Armado shows the order's own product names.
+  - `getImgUrl` skips any entry with no `url` at every step, not only the barcode step.
+  - Images only appear in the assembly list and the item detail. The summary, Pedidos armados and Registro show text only.
+- **Checks passed, on localhost in headless Chrome against the live bucket (version `0e330dae`), with Supabase faked in memory (0 writes reached Supabase, and
+  a second block at the browser's network layer caught 0):**
+  - First load: `version.txt` + `latest.json`, nothing from `imagedb/`, 10,563 keys, 5,492 productos, `calii-masterview` written, old localStorage entry
+    gone. Second load: `version.txt` only.
+  - Full MH Contry assembly with the 19/10 order (451 rows, 152 activos: complete, partial, sobrante, faltante and fecha corta), run through the same steps on
+    the old and new builds with a fixed clock. Report path, report CSV (152 rows), all 616 writes, item order, list text, summary, Registro and Pedidos armados:
+    identical.
+  - Images: 150 of the 152 activos are the same. The other two are better: Tang has a newer photo, and Totopos Calii showed a Charras photo before.
+  - Condesa order: 7501052470245 and 75013356 (CDMX only) and 75041663 (CDMX and Guadalajara) show their images, and none of the three was in the old file.
+  - Network off and local server stopped: shell from the service worker, Masterview from the cache, and the Imágenes line still shows 05/11. With that cache
+    deleted, the bundled file gives 10,563 keys and "Masterview sin conexión · …". The old flat file still loads.
+  - Real upgrade on one origin, from the `-p6` build to this one: old shell cache removed, `calii-masterview` created, old localStorage entry gone. A later
+    `CACHE_NAME` keeps `calii-masterview` with no new download.
+- **Data to review:** 141 of the old file's 9,387 keys are not in Masterview now (62 barcodes, 79 names). `normName` is the same on both sides, so this is
+  the catalog, not the code. When such a product is ordered, the old first-word and prefix fallbacks can show another product's photo. In the 19/10 order's reserva
+  rows, Nachos Tostitos 400g (7501011173521) now shows Doritos, and Totopos Nūbe lemon pepper (767203598955) shows Charras. Barcode 767203598894, Totopos Nūbe
+  enchilados in that order, is IYL425 Chips de camote in Masterview.
+- **Not checked yet:** real phones (Android Chrome, iPhone Safari).
 
 - `loadImageDB` → `masterview/` first.
 - `masterviewReduce`'s output and the cached shape change to object entries. Use `imgUrl()`
@@ -546,6 +632,31 @@ const MV_BUCKET='masterview';
    selected.
 
 ## Phase 6: Remove the other upload paths (after Phase 5 is live)
+
+**Result, Sorting Hub, MH Recibo and Armado CH: done 2026-11-05, committed, not pushed.**
+
+Sorting Hub:
+
+- `handleMasterviewFile` and "Subir Masterview" are gone from Inicio. The card now reads "Masterview actualizado el 05/11 · se sube desde
+  Invoice Reader (admin)", from `masterview/version.txt`, or the cached version when offline.
+- Bundled `imagedb.json` refreshed from version `0e330dae` (1.3 MB to 2.0 MB).
+- The old `sorting-hub/imagedb/` files were left in place and stay in `loadImageDB` as a fallback.
+
+MH Recibo:
+
+- The two-bucket fallback is gone from `loadImageDB`, and `ARMADO_BUCKET` went with it, since nothing else used it. MH Recibo no longer reads
+  either old `imagedb/` folder. It never had an upload button.
+- Bundled `imagedb.json` refreshed from version `0e330dae` (1.3 MB to 2.0 MB).
+
+Armado CH:
+
+- `uploadImageDB`, `masterviewReduce` and the upload button are gone. 🖼 Imágenes now reads "Masterview actualizado el 05/11 · se sube desde Invoice Reader (admin)",
+  from `masterview/version.txt`, or the cached version when offline, with "5,492 productos" from `count` on the line below.
+- Bundled `imagedb.json` is a full copy of `latest.json`, version `0e330dae` (1.3 MB to 2.0 MB).
+- The old `solcitudesarmado/imagedb/` files were left in place, and nothing reads them.
+- `netlify.toml` now revalidates `/imagedb.json` (`max-age=0, must-revalidate`). A phone that already holds the old file under the 30-day header keeps it until that
+  expires, and the service worker's install can precache that same copy. It only matters offline with no cached Masterview, and the loader still reads it. Sorting Hub
+  and MH Recibo still have the 30-day header.
 
 - **Armado CH:** remove `uploadImageDB` and its button from the coordinator tab. Replace them with the
   status line from Decisions §4.
