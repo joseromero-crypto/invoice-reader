@@ -20,7 +20,7 @@ beforeAll(async()=>{
  await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;grant usage on schema auth to authenticated,anon;grant execute on function auth.uid() to authenticated,anon;
  create schema storage;create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);create table storage.objects(id uuid default gen_random_uuid(),bucket_id text,name text);alter table storage.objects enable row level security;
  create function storage.foldername(name text) returns text[] language sql immutable as $$select (string_to_array(name,'/'))[1:array_length(string_to_array(name,'/'),1)-1]$$;grant usage on schema storage to authenticated;grant select,insert on storage.objects to authenticated;`);
- for(const name of fs.readdirSync('supabase/migrations').filter(f=>f.endsWith('.sql')&&f!==RETIRE).sort())await db.exec(fs.readFileSync(`supabase/migrations/${name}`,'utf8').replace('create extension if not exists pgcrypto;',''));
+ for(const name of fs.readdirSync('supabase/migrations').filter(f=>f.endsWith('.sql')&&f<RETIRE).sort())await db.exec(fs.readFileSync(`supabase/migrations/${name}`,'utf8').replace('create extension if not exists pgcrypto;',''));
  await db.exec(`insert into organizations(id,name) values('${org}','Test');insert into auth.users values('${admin}'),('${receiver}'),('${outsider}');insert into members values('${org}','${admin}','admin'),('${org}','${receiver}','receiver');
  insert into products(id,org_id,external_id,sku,name,supplier,unit,raw) values('${legacy}','${org}','101','AAA','Tomate huaje','LALA','pz','{}'),('${lost}','${org}','777','ZZZ','Ya no existe','X','pz','{}');
  insert into supplier_mappings(org_id,supplier,supplier_sku,product_id,confirmed_by) values('${org}','LALA','28328','${legacy}','${admin}');`);
@@ -103,4 +103,16 @@ it('reports what does not map and refuses to retire products until it is resolve
  const revision=(await db.query<any>('select revision from invoice_rows where id=$1',[row.id])).rows[0].revision;
  await db.query('select confirm_receiving_row($1,$2,$3,$4,$5,4,true,false,$6,$7)',[admin,org,row.document_id,row.id,mv,{},revision]);
  await expect(db.query('select confirm_receiving_row($1,$2,$3,$4,$5,4,true,false,$6,$7)',[admin,org,row.document_id,row.id,legacy,{},revision+1])).rejects.toThrow(/Product not found/);
+ await db.exec(fs.readFileSync('supabase/migrations/20261105140000_confirm_hub_city_row.sql','utf8'));
+ const confirmed=async(city:string|null,product=mv)=>{
+  await db.query('update hubs set city=$2 where id=(select s.hub_id from documents d join receiving_sessions s on s.id=d.session_id where d.id=$1)',[row.document_id,city]);
+  await db.query('update invoice_rows set review=$2 where id=$1',[row.id,{flags:[],confirmed:false}]);
+  const {revision}=(await db.query<any>('select revision from invoice_rows where id=$1',[row.id])).rows[0];
+  await db.query('select confirm_receiving_row($1,$2,$3,$4,$5,4,true,false,$6,$7)',[admin,org,row.document_id,row.id,product,{},revision]);
+  return (await db.query<any>('select review from invoice_rows where id=$1',[row.id])).rows[0].review.product.name;
+ };
+ expect(await confirmed('CDMX')).toBe('Jitomate saladet');
+ expect(await confirmed('Monterrey')).toBe('Tomate huaje');
+ expect(await confirmed(null)).toBe('Tomate huaje');
+ expect(await confirmed('Saltillo')).toBe('Tomate huaje');
 });

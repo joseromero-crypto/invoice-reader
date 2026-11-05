@@ -2,7 +2,7 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 import {match,normCode,type Mappings} from '../lean/match.ts';
 import type {Transcription} from '../lean/transcribe.ts';
 import {leanRows} from './lean-rows.ts';
-import {asCatalogItem,asProduct,catalog} from './workspace';
+import {asProducts,catalog,cityItems,hubCity} from './workspace';
 import {check,HttpError} from './auth';
 export async function leanMappings(db:SupabaseClient,orgId:string,rawProducts:any[]):Promise<Mappings>{
  const known=new Set(rawProducts.map(p=>p.id));
@@ -15,9 +15,10 @@ export async function rematchDocument(db:SupabaseClient,orgId:string,userId:stri
  const job=check(await db.from('extraction_jobs').select('status,raw_result').eq('org_id',orgId).eq('document_id',document.id).single())!;
  if(job.status!=='complete')throw new HttpError(409,'La lectura todavía no está completa.');
  const t=job.raw_result?.transcription as Transcription|undefined;if(!t)throw new HttpError(409,'Esta factura se leyó con el lector anterior; no se puede actualizar.');
- const rawProducts=await catalog(db);
- const result=match(t,rawProducts.map(asCatalogItem),await leanMappings(db,orgId,rawProducts));
- const proposals=leanRows(t,result,rawProducts.map(asProduct));
+ const session=check(await db.from('receiving_sessions').select('hub_id').eq('org_id',orgId).eq('id',document.session_id).single())!;
+ const city=await hubCity(db,session.hub_id),rawProducts=await catalog(db,city);
+ const result=match(t,cityItems(rawProducts,city),await leanMappings(db,orgId,rawProducts));
+ const proposals=leanRows(t,result,asProducts(rawProducts,city));
  const rows=check(await db.from('invoice_rows').select('id,source_row,revision,review').eq('org_id',orgId).eq('document_id',document.id))!;
  let updated=0,preserved=0;
  for(const row of rows){

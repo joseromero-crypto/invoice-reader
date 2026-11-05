@@ -16,9 +16,11 @@ export interface CatalogItem {
   barcodes: string[];    // Código de Barras (may hold several)
   purchaseUnit: string;  // Unidad de compra (Caja / Pieza / '')
   perPurchaseUnit: number | null; // Peso neto o piezas (por unidad de compra)
+  aliases?: string[];    // the Item text in other cities, for description candidates
+  otherCity?: string;    // this entry is that city's row, not the hub's: a candidate, never auto-selected
 }
 
-export interface Candidate { id: string; name: string; sku: string; score: number }
+export interface Candidate { id: string; name: string; sku: string; score: number; otherCity?: string }
 
 export interface Proposal {
   row: TranscribedRow;
@@ -134,8 +136,17 @@ export function quantity(row: TranscribedRow, cols: string[], item: CatalogItem 
 
 // ---------- main ----------
 export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappings = new Map()): MatchResult {
-  const byBarcode = new Map<string, CatalogItem[]>();
-  for (const it of catalog) for (const b of it.barcodes) { const k = normCode(b); if (k.length >= 6) byBarcode.set(k, [...(byBarcode.get(k) ?? []), it]); }
+  // The hub's city comes first; entries with otherCity are only looked at when the hub's own rows explain nothing.
+  const local = catalog.filter(c => !c.otherCity);
+  const index = (items: CatalogItem[]) => {
+    const barcode = new Map<string, CatalogItem[]>(), sku = new Map<string, CatalogItem[]>();
+    for (const it of items) {
+      for (const b of it.barcodes) { const k = normCode(b); if (k.length >= 6) barcode.set(k, [...(barcode.get(k) ?? []), it]); }
+      const k = normCode(it.supplierSku); if (k) sku.set(k, [...(sku.get(k) ?? []), it]);
+    }
+    return { barcode, sku };
+  };
+  const { barcode: byBarcode, sku: skuGlobal } = index(local), everywhere = index(catalog);
 
   const rows = t.rows ?? [];
   // A printed pieces total (e.g. Bimbo "PIEZAS EN VENTA 136") that equals the sum of an unlabeled
@@ -150,27 +161,34 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
 
   // Supplier: the catalog supplier whose barcodes/SKUs explain the most rows (printed legal names often
   // differ from catalog names, e.g. "Comercializadora de Lácteos" = LALA). Fall back to the printed name.
-  const skuGlobal = new Map<string, CatalogItem[]>();
-  for (const it of catalog) { const k = normCode(it.supplierSku); if (k) skuGlobal.set(k, [...(skuGlobal.get(k) ?? []), it]); }
-  const votes = new Map<string, number>();
-  codes.forEach(c => {
-    const hit = new Set<string>();
-    for (const b of c.barcodes) for (const it of byBarcode.get(b) ?? []) hit.add(it.supplier);
-    for (const k of c.keys) for (const it of skuGlobal.get(k) ?? []) hit.add(it.supplier);
-    for (const s of hit) votes.set(s, (votes.get(s) ?? 0) + 1);
-  });
-  const ranked = [...votes.entries()].sort((a, b) => b[1] - a[1]);
-  let supplier = ranked[0] && ranked[0][1] >= Math.max(2, rows.length * 0.3) ? ranked[0][0] : null;
-  if (!supplier && t.supplier) {
+  const vote = (ix: ReturnType<typeof index>) => {
+    const votes = new Map<string, number>();
+    codes.forEach(c => {
+      const hit = new Set<string>();
+      for (const b of c.barcodes) for (const it of ix.barcode.get(b) ?? []) hit.add(it.supplier);
+      for (const k of c.keys) for (const it of ix.sku.get(k) ?? []) hit.add(it.supplier);
+      for (const s of hit) votes.set(s, (votes.get(s) ?? 0) + 1);
+    });
+    const ranked = [...votes.entries()].sort((a, b) => b[1] - a[1]);
+    return ranked[0] && ranked[0][1] >= Math.max(2, rows.length * 0.3) ? ranked[0][0] : null;
+  };
+  const printedName = (items: CatalogItem[]) => {
+    if (!t.supplier) return null;
     const printed = fold(t.supplier);
-    const names = [...new Set(catalog.map(c => c.supplier))].filter(Boolean);
-    supplier = names.find(s => fold(s).split(/\s+/).some(w => w.length > 3 && printed.includes(w))) ?? null;
-  }
-  const pool = supplier ? catalog.filter(c => c.supplier === supplier) : catalog;
-  const bySku = new Map<string, CatalogItem[]>();
-  for (const it of pool) { const k = normCode(it.supplierSku); if (k) bySku.set(k, [...(bySku.get(k) ?? []), it]); }
-  const poolTokens = pool.map(it => [it, tokens(it.name)] as const);
-  const allTokens = supplier ? catalog.map(it => [it, tokens(it.name)] as const) : poolTokens;
+    const names = [...new Set(items.map(c => c.supplier))].filter(Boolean);
+    return names.find(s => fold(s).split(/\s+/).some(w => w.length > 3 && printed.includes(w))) ?? null;
+  };
+  const supplier = vote({ barcode: byBarcode, sku: skuGlobal }) ?? printedName(local) ?? vote(everywhere) ?? printedName(catalog);
+  const pool = supplier ? local.filter(c => c.supplier === supplier) : local;
+  const bySku = index(pool).sku;
+  const withTokens = (it: CatalogItem) => [it, [it.name, ...(it.aliases ?? [])].map(tokens)] as const;
+  const poolTokens = pool.map(withTokens);
+  // Description candidates also cover products the hub's city doesn't have, once each.
+  const localIds = new Set(local.map(c => c.id));
+  const exclusive = [...new Map(catalog.filter(c => !localIds.has(c.id)).reverse().map(c => [c.id, c])).values()];
+  const allTokens = supplier || exclusive.length ? [...local, ...exclusive].map(withTokens) : poolTokens;
+  const candidate = (c: CatalogItem, score: number): Candidate => ({ id: c.id, name: c.name, sku: c.sku, score, ...(c.otherCity ? { otherCity: c.otherCity } : {}) });
+  const distinct = (items: CatalogItem[]) => items.filter((c, k, a) => a.findIndex(x => x.id === c.id) === k);
 
   const proposals = rows.map((row, i): Proposal => {
     const reasons: string[] = [];
@@ -178,7 +196,13 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
     let item: CatalogItem | null = null, matchedBy: Proposal['matchedBy'] = null;
 
     const mapSupplier = supplier ?? t.supplier?.trim() ?? '';
-    for (const k of [...keys, ...barcodes]) { const id = mappings.get(`${mapSupplier}|${k}`); const hit = id && catalog.find(c => c.id === id); if (hit) { item = hit; matchedBy = 'mapping'; break; } }
+    const mappedAway: CatalogItem[] = [];
+    for (const k of [...keys, ...barcodes]) {
+      const id = mappings.get(`${mapSupplier}|${k}`); if (!id) continue;
+      const hit = local.find(c => c.id === id);
+      if (hit) { item = hit; matchedBy = 'mapping'; break; }
+      mappedAway.push(...catalog.filter(c => c.id === id));
+    }
     const bcHits = [...new Set(barcodes.flatMap(b => byBarcode.get(b) ?? []))];
     let skuHits = [...new Set(keys.flatMap(k => bySku.get(k) ?? []))];
     const desc = tokens(row.description ?? '');
@@ -190,13 +214,24 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
     if (!item && skuHits.length === 1) { item = skuHits[0]; matchedBy = 'supplierSku'; }
     else if (!item && skuHits.length > 1) reasons.push('clave de proveedor en varios productos');
     if (item && matchedBy === 'barcode' && skuHits.length && !skuHits.includes(item)) reasons.push(`clave ${keys.join('/')} apunta a otro producto (${skuHits[0].name}); se usó el código de barras`);
+    // Masterview gives this barcode to another SKU too (in any city): the barcode alone can't confirm the product.
+    const sameBarcode = item && matchedBy === 'barcode' && !skuHits.includes(item)
+      ? distinct(barcodes.flatMap(b => everywhere.barcode.get(b) ?? [])).filter(c => c.id !== item!.id) : [];
+    if (sameBarcode.length) reasons.push('código de barras de varios SKU en Masterview; confirma el producto');
+    // Nothing in the hub's city: codes from other cities only suggest a product, for a person to pick.
+    const away = item ? [] : distinct([...mappedAway, ...(bcHits.length || skuHits.length ? [] : [
+      ...barcodes.flatMap(b => everywhere.barcode.get(b) ?? []),
+      ...keys.flatMap(k => everywhere.sku.get(k) ?? []).filter(it => similarity(desc, tokens(it.name)) >= 0.3),
+    ])].filter(c => c.otherCity));
+    for (const c of away) reasons.push(`Otra ciudad (${c.otherCity}): el código coincide con ${c.name}`);
 
-    const rank = (list: (readonly [CatalogItem, Set<string>])[]) => list.map(([it, tk]) => ({ id: it.id, name: it.name, sku: it.sku, score: similarity(desc, tk) }))
+    const rank = (list: (readonly [CatalogItem, Set<string>[]])[]) => list.map(([it, names]) => candidate(it, Math.max(...names.map(tk => similarity(desc, tk)))))
       .filter(c => c.score > 0.25).sort((a, b) => b.score - a.score).slice(0, 3);
     let candidates = item ? [] : rank(poolTokens);
     if (!item && (candidates[0]?.score ?? 0) < 0.5) candidates = [...candidates, ...rank(allTokens)].sort((a, b) => b.score - a.score).filter((c, k, a) => a.findIndex(x => x.id === c.id) === k).slice(0, 3);
-    for (const c of bcHits.length > 1 ? bcHits : skuHits.length > 1 ? skuHits : []) candidates.unshift({ id: c.id, name: c.name, sku: c.sku, score: 1 });
-    if (!item) reasons.push(candidates.length ? 'elegir producto (sin código coincidente)' : 'producto no encontrado en catálogo');
+    for (const c of bcHits.length > 1 ? bcHits : skuHits.length > 1 ? skuHits : []) candidates.unshift(candidate(c, 1));
+    candidates = [...away, ...sameBarcode].map(c => candidate(c, 1)).concat(candidates).filter((c, k, a) => a.findIndex(x => x.id === c.id) === k);
+    if (!item && !away.length) reasons.push(candidates.length ? 'elegir producto (sin código coincidente)' : 'producto no encontrado en catálogo');
 
     const q = quantity(row, cols, item);
     if (!q.ok) reasons.push(q.note ?? 'confirmar cantidad');

@@ -3,7 +3,7 @@ import {CorrectionsSchema} from '../../shared/domain';
 import {limits} from '../../server/config';
 import {authorize,check,HttpError,failure} from '../../server/auth';
 import {requireHub,listHubs} from '../../server/hubs';
-import {loadWorkspace} from '../../server/workspace';
+import {hubCity,loadWorkspace} from '../../server/workspace';
 import {rematchDocument} from '../../server/rematch';
 import {mappingKeys} from '../../lean/match.ts';
 const uuid=z.string().uuid();
@@ -57,7 +57,7 @@ export default async function handler(request:Request){
  return Response.json({ok:true});
  }
  if(b.action==='add-row'){
- const product=check(await db.from('mv_products').select('id,sku,name,barcode,calii_unit,base_city,mv_product_city(city,name,barcode,proveedor,sku_proveedor)').eq('id',b.productId).maybeSingle());if(!product)throw new HttpError(404,'Product not found');const city=product.mv_product_city.find(c=>c.city===product.base_city);
+ const product=check(await db.from('mv_products').select('id,sku,name,barcode,calii_unit,base_city,mv_product_city(city,name,barcode,proveedor,sku_proveedor)').eq('id',b.productId).maybeSingle());if(!product)throw new HttpError(404,'Product not found');const hub=await hubCity(db,session.hub_id),city=product.mv_product_city.find(c=>c.city===hub)??product.mv_product_city.find(c=>c.city===product.base_city);
  const job=check(await db.from('extraction_jobs').select('status').eq('org_id',orgId).eq('document_id',b.documentId).maybeSingle());if(job&&['queued','processing'].includes(job.status))throw new HttpError(409,'Espera a que termine la lectura.');
  // Manual rows start at 1001 so a later re-read never collides with them.
  const last=check(await db.from('invoice_rows').select('source_row').eq('org_id',orgId).eq('document_id',b.documentId).order('source_row',{ascending:false}).limit(1).maybeSingle());

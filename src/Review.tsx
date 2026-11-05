@@ -12,15 +12,16 @@ const transcribed=(r:Row)=>Array.isArray(r.sourceDetails?.codes)?r.sourceDetails
 // Same rules as lean/match.ts: a different product can change cajas × piezas por caja.
 function piecesFor(r:Row,product:Product|null){const t=transcribed(r);if(!t||!r.columns)return null;return quantity(t,r.columns,product&&toItem(product)).q;}
 const fold=(s:string)=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+const City=({p}:{p:Product})=>p.otherCity?<span className="c-tag c-tag--ink lean-city">Otra ciudad ({p.otherCity})</span>:null;
 function ProductPicker({value,candidates,products,disabled,onChange,big=false}:{value:Product|null;candidates:Product[];products:Product[];disabled:boolean;onChange:(p:Product)=>void;big?:boolean}){
  const [open,setOpen]=useState(false),[query,setQuery]=useState('');
  const q=fold(query.trim()),words=q.split(/\s+/);
- const found=q?products.filter(p=>{const hay=fold(`${p.name} ${p.sku} ${p.supplierSku??''} ${p.barcode??''}`);return words.every(w=>hay.includes(w));}).slice(0,12):[];
+ const found=q?products.filter(p=>{const hay=fold(`${p.name} ${p.aliases?.join(' ')??''} ${p.sku} ${p.supplierSku??''} ${p.barcode??''}`);return words.every(w=>hay.includes(w));}).slice(0,12):[];
  const pick=(p:Product)=>{onChange(p);setOpen(false);setQuery('');};
- return <div className="lean-picker"><button type="button" className={`lean-picked${big?' big':''}${value?'':' unset'}`} disabled={disabled} onClick={()=>setOpen(!open)} aria-label={value?`Cambiar ${value.name}`:'Elegir producto'}><span><strong>{value?.name??'Elegir producto'}</strong></span><ChevronDown size={big?14:15}/></button>
+ return <div className="lean-picker"><button type="button" className={`lean-picked${big?' big':''}${value?'':' unset'}`} disabled={disabled} onClick={()=>setOpen(!open)} aria-label={value?`Cambiar ${value.name}`:'Elegir producto'}><span><strong>{value?.name??'Elegir producto'}</strong>{value&&<City p={value}/>}</span><ChevronDown size={big?14:15}/></button>
  {open&&<div className="lean-picker-menu"><label className="search wide"><Search size={14}/><input autoFocus placeholder="Buscar en el catálogo…" value={query} onChange={e=>setQuery(e.target.value)}/></label>
- {!q&&candidates.length>0&&<><div className="lean-picker-label">Sugeridos</div>{candidates.map(p=><button type="button" key={p.id} onClick={()=>pick(p)}>{p.name}<code>{p.sku}</code></button>)}</>}
- {q&&found.map(p=><button type="button" key={p.id} onClick={()=>pick(p)}>{p.name}<code>{p.sku}</code></button>)}
+ {!q&&candidates.length>0&&<><div className="lean-picker-label">Sugeridos</div>{candidates.map(p=><button type="button" key={p.id} onClick={()=>pick(p)}>{p.name}<City p={p}/><code>{p.sku}</code></button>)}</>}
+ {q&&found.map(p=><button type="button" key={p.id} onClick={()=>pick(p)}>{p.name}<City p={p}/><code>{p.sku}</code></button>)}
  {q&&!found.length&&<div className="lean-picker-label">Sin resultados</div>}
  {!q&&!candidates.length&&<div className="lean-picker-label">Escribe para buscar</div>}</div>}</div>;
 }
@@ -44,7 +45,7 @@ export default function ReviewList({doc,products,busy,readOnly,onConfirm,onAddRo
  const q=search.trim().toLowerCase(),visible=doc.rows.filter(r=>!q||`${r.product?.name??''} ${r.product?.sku??''} ${r.description} ${r.supplierSku??''}`.toLowerCase().includes(q));
  const groups={ok:visible.filter(r=>rowStatus(r)==='ok'),review:visible.filter(r=>rowStatus(r)==='review'),excluded:visible.filter(r=>rowStatus(r)==='excluded')};
  const openWarnings=doc.warnings.filter(w=>!acked.includes(w));
- const ready=doc.rows.filter(r=>rowStatus(r)==='ok'&&!r.confirmed).map(item).filter((c):c is Confirmation=>!!c);
+ const ready=doc.rows.filter(r=>rowStatus(r)==='ok'&&!r.confirmed).map(item).filter((c):c is Confirmation=>!!c&&!c.product.otherCity);
  const disabled=busy||readOnly;
  const table=(rows:Row[])=><ul className="lean-list"><li className="lean-head"><span>Artículo Calii</span><span>Piezas</span><span/></li>{rows.map(r=><LeanRow key={r.id} row={r} draft={draft(r)} setDraft={setDraft(r)} products={products} disabled={disabled} onConfirm={()=>{const c=item(r);if(c)onConfirm([c]);}}/>)}</ul>;
  const confirmed=doc.rows.filter(r=>r.confirmed);

@@ -3,7 +3,7 @@ import {transcribe,type ImageInput,type ReadResult} from '../lean/transcribe.ts'
 import {prepareImage} from '../lean/image.ts';
 import {match} from '../lean/match.ts';
 import {leanRows,isoDate} from './lean-rows.ts';
-import {asCatalogItem,asProduct,catalog} from './workspace';
+import {asProducts,catalog,cityItems,hubCity} from './workspace';
 import {leanMappings} from './rematch';
 import {requireHub} from './hubs';
 import {limits} from './config';
@@ -41,8 +41,8 @@ export async function extractJob(request:Request,jobId:string){
  }
  read=await transcribe(apiKey,model,images);
  const t=read.transcription;if(!t||!Array.isArray(t.rows))throw new HttpError(502,readFailure(read.error));
- const rawProducts=await catalog(db),products=rawProducts.map(asProduct);
- const result=match(t,rawProducts.map(asCatalogItem),await leanMappings(db,orgId,rawProducts));
+ const city=await hubCity(db,receiving.hub_id),rawProducts=await catalog(db,city),products=asProducts(rawProducts,city);
+ const result=match(t,cityItems(rawProducts,city),await leanMappings(db,orgId,rawProducts));
  const supplier=result.supplier??t.supplier,reference=t.documentRef,warnings=[...result.warnings];
  if(read.error)warnings.push(`Lectura incompleta (${read.error}). Revisa que estén todos los renglones.`);
  if(reference&&supplier){const duplicates=check(await db.from('documents').select('id,receiving_sessions!inner(hub_id)').eq('org_id',orgId).eq('receiving_sessions.hub_id',receiving.hub_id).eq('supplier',supplier).eq('reference',reference).neq('id',document.id))!;if(duplicates.length)warnings.push('Posible factura duplicada: proveedor y referencia ya registrados en este hub.');}

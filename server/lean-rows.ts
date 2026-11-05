@@ -9,7 +9,7 @@ export function leanRows(t:Transcription,result:MatchResult,products:Product[]){
  const byId=new Map(products.map(p=>[p.id,p])),supplier=mappingSupplier(result,t);
  return result.proposals.map((p,i)=>{
   const codes=rowCodes(p.row),flags=p.status==='ok'?[]:p.reasons;
-  const row:Row={id:randomUUID(),sourceRow:i+1,sourcePage:p.row.photo,description:p.row.description,supplierSku:codes.keys[0]??null,barcode:codes.barcodes[0]??null,billedQuantity:null,billedUnit:p.row.unit,price:null,amount:null,proposedQuantity:p.quantity,actualQuantity:null,confirmedQuantity:null,product:(p.item&&byId.get(p.item.id))??null,candidates:p.candidates.map(c=>byId.get(c.id)).filter((c):c is Product=>!!c),evidence:p.matchedBy?[matchedLabel[p.matchedBy]]:[],flags,resolvedFlags:[],conversion:p.quantityBasis,confirmed:false,status:p.status,reasons:p.reasons,mappingSupplier:supplier,columns:t.quantityColumns??[]};
+  const row:Row={id:randomUUID(),sourceRow:i+1,sourcePage:p.row.photo,description:p.row.description,supplierSku:codes.keys[0]??null,barcode:codes.barcodes[0]??null,billedQuantity:null,billedUnit:p.row.unit,price:null,amount:null,proposedQuantity:p.quantity,actualQuantity:null,confirmedQuantity:null,product:(p.item&&byId.get(p.item.id))??null,candidates:p.candidates.map(c=>{const found=byId.get(c.id);return found&&c.otherCity?{...found,otherCity:c.otherCity}:found;}).filter((c):c is Product=>!!c),evidence:p.matchedBy?[matchedLabel[p.matchedBy]]:[],flags,resolvedFlags:[],conversion:p.quantityBasis,confirmed:false,status:p.status,reasons:p.reasons,mappingSupplier:supplier,columns:t.quantityColumns??[]};
   return {...row,raw:p.row};
  });
 }

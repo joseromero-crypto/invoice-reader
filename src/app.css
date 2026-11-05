@@ -203,6 +203,8 @@ td small{display:block;font-size:var(--fs-sm);color:var(--c-muted)}
 .lean-picker-menu>button{display:flex;align-items:center;gap:var(--s-3);width:100%;min-height:44px;padding:0 var(--s-3);border-radius:var(--r-sm);text-align:left;font-size:14px;font-weight:600}
 .lean-picker-menu>button:hover{background:var(--c-surface)}
 .lean-picker-menu code{margin-left:auto}
+.lean-city{flex:none}
+.lean-picked .lean-city{margin-top:4px}
 .lean-picker-label{padding:var(--s-2) var(--s-3) 4px;font-size:12px;font-weight:600;color:var(--c-muted)}
 .lean-add{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2);margin:0 var(--s-5) var(--s-3);padding:var(--s-3);border-radius:var(--r-lg);background:var(--c-surface)}
 .lean-add .lean-picker{flex:1;min-width:220px}
