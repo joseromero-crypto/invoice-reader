@@ -1,6 +1,6 @@
 # Unify Masterview — one catalog for Armado CH, Sorting Hub, MH Recibo and Invoice Reader
 
-Status: Phase 1 done 2026-11-05; the rest is not built. Written 2026-11-03 from the code in the four repos and the all-cities export
+Status: Phases 1 and 3 done 2026-11-05. Phase 2 is built and tested; retiring `products` and the first upload wait for the deploy. The rest is not built. Written 2026-11-03 from the code in the four repos and the all-cities export
 (`table-data - 2026-11-03T101825.372.csv`, which had the wrong column set; see §0).
 
 This file lives in all four repos (armado-CH, sorting-hub, mh-recibo, calii-invoice-reader), as
@@ -206,6 +206,45 @@ project).
 
 ## Phase 2: Shared catalog + the one importer (repo `calii-invoice-reader`)
 
+**Result: built 2026-11-05, committed, not deployed.** The steps below are kept as the record of what was planned.
+
+- **Left to do, in this order:**
+  1. Jose reviews the test import report below, then pushes.
+  2. After the deploy, Jose runs `supabase/migrations/20261105130000_retire_products.sql` in the SQL editor. Not before: the
+     code now live reads `products`. It stops, changing nothing, if a mapping has no Masterview product.
+  3. Jose does the first real upload in Invoice Reader → Masterview. That's what publishes `masterview/latest.json`. Use
+     fresh exports (see "Data").
+- **What's in the project now:** `20261105120000_masterview_shared.sql` applied (additive; live site unaffected). One test
+  import of the four 11-03 files: 5,492 products, 18,612 city rows, raw CSVs at `catalogs/masterview/{city}/latest.csv`.
+  **Nothing published:** the `masterview` bucket is empty. `hubs.city` seeded; "Pruebas de facturas" has no city.
+- **Test import report:** Monterrey 4,896 / Saltillo 4,714 (+56 exclusive, 238 missing vs Monterrey) / CDMX 4,528 (+302, 670
+  missing) / Guadalajara 4,474 (+302, 724 missing). 29 SKUs change name between cities, 56 barcodes belong to more than one
+  SKU, 0 retired, no warnings. Full report: `private/catalog/mv-test-import-report.json`.
+- **Remap:** 11 of 11 `supplier_mappings` mapped, no SKU changed, 0 unmapped. `quantity_conversions` has 0 rows.
+- **Checks passed:** bench `--replay` 238/238 quantities, 212 identity, 201 bulk-confirmable, on the old CSV and on the 11-03
+  Monterrey file through the importer's parser and whitelist (`--masterview`), with identical reports; 259/259 unit tests.
+  The new catalog read has the same 4,896 SKUs as `products`.
+- **Data:** the 11-03 files are a day older than `products` (11-04). 5 values differ for that reason alone: pieces per
+  purchase unit on VWJ653, KFE338, PSH792, PDK723, and the name of ABP084.
+- **Timing:** the four-file import took about 46 s locally, plus 11 s of upload. `read_mv_catalog` takes 1.9 s and 9 MB, down
+  from ~11 s and 22 MB. `latest.json` would be 2.0 MB, not the 1.5 MB estimated.
+- **Not tested live:** the screen and the background function with a real session (a Google sign-in is needed). The screen
+  was checked with stubbed data; the functions by tests, including the admin refusal and the publish order.
+- **Changed from the plan:**
+  - `product_id` is replaced by a new column `mv_product_id` instead of being swapped in place, and retiring is a separate
+    migration. So old and new code both work until the retire migration runs, and `confirm_receiving_row_v1` accepts both ids.
+  - Matching reads Monterrey rows only (`MATCH_CITY` in `lean/catalog.ts`), so it stays exactly as before. Products that exist
+    only in other cities reach matching and search in Phase 4.4.
+  - The browser uploads to `catalogs/masterview/{city}/incoming-*.csv` with signed URLs. `latest.csv` is replaced only after the
+    import commits, so a rejected file can't overwrite the last good one or break "Releer últimos archivos".
+  - The background function reports through `catalogs/masterview/job.json`, because a rejected upload leaves no `mv_imports` row.
+    That file also allows one import at a time.
+  - `alt` only lists cities the `map` entry doesn't cover. A barcode repeated inside one city stays in the report, and readers
+    keep the `map` entry there.
+  - Re-importing identical files reuses the `mv_imports` row and moves its date.
+  - `Item` keeps its exact text, including trailing spaces, because it's what gets copied back to Retool.
+  - Invoice rows saved before the switch hold Retool ids and can't be confirmed until "Actualizar coincidencias" is pressed.
+
 ### 2.1 Schema: new migration `2026110xxxxx_masterview_shared.sql`
 
 ```sql
@@ -393,6 +432,17 @@ alter table public.hubs add column city text;   -- seed with the table in Decisi
 ---
 
 ## Phase 3: Validate (repo `calii-invoice-reader`, script, free)
+
+**Result: done 2026-11-05, nothing to accept.** `scripts/mv-compare.ts` on the four 11-03 exports against the all-cities lean file:
+
+| City | Full / lean rows | SKU differences | `Item`, `Proveedor`, `Calii Unit`, `Source Unit` differences | No image | No barcode | Barcodes repeated in the city |
+|---|---|---|---|---|---|---|
+| Monterrey | 4,896 / 4,896 | 0 | 0 | 0 | 344 | 12 |
+| Saltillo | 4,714 / 4,714 | 0 | 0 | 0 | 323 | 8 |
+| CDMX | 4,528 / 4,528 | 0 | 0 | 0 | 310 | 7 |
+| Guadalajara | 4,474 / 4,474 | 0 | 0 | 0 | 304 | 6 |
+
+Full list: `private/catalog/mv-compare-2026-11-03.md`.
 
 `scripts/mv-compare.ts <all-cities-lean.csv> <city.csv>...`: for each per-city full export, compare it
 with that city's rows in the all-cities lean file.

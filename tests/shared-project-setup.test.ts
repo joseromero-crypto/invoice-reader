@@ -36,6 +36,28 @@ it('sets up the reader without touching other apps, with explicit grants and not
  const open=(await db.query<{name:string}>(`select p.oid::regprocedure::text as name from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in('public','app_private') and p.proname<>'rec_alert_record' and has_function_privilege('anon',p.oid,'execute')`)).rows.map(r=>r.name);
  expect(open).toEqual([]);
 },30000);
+it('moves to the shared Masterview without touching other apps, with no anon access',async()=>{
+ const db=await sharedProject();await db.exec(setup);
+ await db.exec(`create table public.partial_events(id int);insert into storage.buckets(id,name,public) values('solcitudesarmado','solcitudesarmado',true),('sorting-hub','sorting-hub',true);`);
+ await db.exec(fs.readFileSync('supabase/migrations/20261105120000_masterview_shared.sql','utf8'));
+ await db.exec(fs.readFileSync('supabase/migrations/20261105130000_retire_products.sql','utf8'));
+ const one=async<T=any>(sql:string,p:any[]=[])=>(await db.query<T>(sql,p)).rows[0];
+ for(const table of ['mv_imports','mv_products','mv_product_city']){
+  const can=async(role:string,priv:string)=>(await one<{ok:boolean}>('select has_table_privilege($1,$2,$3) ok',[role,`public.${table}`,priv])).ok;
+  for(const priv of ['select','insert','update','delete','truncate'])expect(await can('anon',priv),`anon ${priv} ${table}`).toBe(false);
+  expect(await can('authenticated','select')).toBe(true);
+  for(const priv of ['insert','update','delete'])expect(await can('authenticated',priv),`authenticated ${priv} ${table}`).toBe(false);
+  for(const priv of ['select','insert','update','delete'])expect(await can('service_role',priv),`service_role ${priv} ${table}`).toBe(true);
+  expect((await one<{r:boolean}>(`select relrowsecurity r from pg_class where oid='public.${table}'::regclass`)).r).toBe(true);
+ }
+ const open=(await db.query<{name:string}>(`select p.oid::regprocedure::text as name from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in('public','app_private') and p.proname<>'rec_alert_record' and (has_function_privilege('anon',p.oid,'execute') or (p.proname like '%mv%' and has_function_privilege('authenticated',p.oid,'execute')))`)).rows.map(r=>r.name);
+ expect(open).toEqual([]);
+ expect((await one(`select public from storage.buckets where id='masterview'`)).public).toBe(true);
+ expect(await one(`select to_regclass('public.products') p,to_regclass('public.catalog_imports') c,to_regclass('public.picks')::text k,to_regclass('public.rec_events')::text e,to_regclass('public.partial_events')::text a`)).toEqual({p:null,c:null,k:'picks',e:'rec_events',a:'partial_events'});
+ expect((await one(`select proconfig from pg_proc where proname='rec_alert_record'`)).proconfig).toEqual(['search_path=public']);
+ expect((await db.query(`select id from storage.buckets where id in('recibo','solcitudesarmado','sorting-hub')`)).rows).toHaveLength(3);
+ expect((await db.query<any>(`select name from public.hubs where city is null and name<>'Pruebas de facturas'`)).rows).toEqual([]);
+},30000);
 it('applies nothing when a name is already in use',async()=>{
  const db=await sharedProject();await db.exec('create table public.products(id int);insert into storage.buckets(id,name) values(\'invoices\',\'invoices\')');
  await expect(db.exec(setup)).rejects.toThrow(/Name collision, nothing applied: .*public\.products.*bucket invoices/);

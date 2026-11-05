@@ -5,9 +5,9 @@ import {leanRows} from './lean-rows.ts';
 import {asCatalogItem,asProduct,catalog} from './workspace';
 import {check,HttpError} from './auth';
 export async function leanMappings(db:SupabaseClient,orgId:string,rawProducts:any[]):Promise<Mappings>{
- const externalId=new Map(rawProducts.map(p=>[p.id,p.external_id]));
- const rows=check(await db.from('supplier_mappings').select('supplier,supplier_sku,product_id').eq('org_id',orgId))!;
- return new Map(rows.filter(m=>externalId.has(m.product_id)).map(m=>[`${m.supplier}|${normCode(m.supplier_sku)}`,externalId.get(m.product_id)]));
+ const known=new Set(rawProducts.map(p=>p.id));
+ const rows=check(await db.from('supplier_mappings').select('supplier,supplier_sku,mv_product_id').eq('org_id',orgId))!;
+ return new Map(rows.filter(m=>known.has(m.mv_product_id)).map(m=>[`${m.supplier}|${normCode(m.supplier_sku)}`,m.mv_product_id]));
 }
 // Explicit, paid-free refresh: re-run match() on the saved transcription with the current
 // catalog and mappings. Rows edited/confirmed by a receiver are preserved.
@@ -15,7 +15,7 @@ export async function rematchDocument(db:SupabaseClient,orgId:string,userId:stri
  const job=check(await db.from('extraction_jobs').select('status,raw_result').eq('org_id',orgId).eq('document_id',document.id).single())!;
  if(job.status!=='complete')throw new HttpError(409,'La lectura todavía no está completa.');
  const t=job.raw_result?.transcription as Transcription|undefined;if(!t)throw new HttpError(409,'Esta factura se leyó con el lector anterior; no se puede actualizar.');
- const rawProducts=await catalog(db,orgId);
+ const rawProducts=await catalog(db);
  const result=match(t,rawProducts.map(asCatalogItem),await leanMappings(db,orgId,rawProducts));
  const proposals=leanRows(t,result,rawProducts.map(asProduct));
  const rows=check(await db.from('invoice_rows').select('id,source_row,revision,review').eq('org_id',orgId).eq('document_id',document.id))!;

@@ -1,18 +1,17 @@
 import type {Workspace,Product,Document,Row} from '../shared/domain';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {check} from './auth';
-import {catalogItem,type CatalogItem} from '../lean/match.ts';
-// products.raw holds the full Retool row (Unidad de compra, Peso neto o piezas, SKU Proveedor, ...).
-export function asCatalogItem(p:any):CatalogItem{const c=catalogItem(p.raw??{});return {...c,id:p.external_id,name:p.name,sku:p.sku,supplier:c.supplier||p.supplier||'',supplierSku:c.supplierSku||p.supplier_sku||'',barcodes:c.barcodes.length?c.barcodes:p.barcode?[p.barcode]:[]};}
-export function asProduct(p:any):Product{const c=asCatalogItem(p);return {id:p.external_id,sku:p.sku,name:p.name,nameColumn:p.catalog_imports?.report?.nameColumn??'Item',supplier:p.supplier,supplierSku:p.supplier_sku,barcode:p.barcode,unit:p.unit,purchaseUnit:c.purchaseUnit,perPurchaseUnit:c.perPurchaseUnit};}
-export async function catalog(db:SupabaseClient,orgId:string):Promise<any[]>{return check(await db.rpc('read_catalog_snapshot',{p_org:orgId}))??[];}
-// The catalog read is ~20 MB; polls send it again only when the catalog version changed.
+import {asCatalogItem,MATCH_CITY} from '../lean/catalog.ts';
+export {asCatalogItem};
+export function asProduct(p:any):Product{const c=asCatalogItem(p);return {id:p.id,sku:p.sku,name:c.name,nameColumn:'Item',supplier:c.supplier,supplierSku:c.supplierSku||null,barcode:p.city_row.barcode??p.barcode??null,unit:p.calii_unit||'desconocida',purchaseUnit:c.purchaseUnit,perPurchaseUnit:c.perPurchaseUnit};}
+export async function catalog(db:SupabaseClient):Promise<any[]>{return check(await db.rpc('read_mv_catalog',{p_city:MATCH_CITY}))??[];}
+// The catalog read is several MB; polls send it again only when the catalog version changed.
 // Independent reads run in parallel (each is a round trip to Supabase).
 export async function loadWorkspace(db:SupabaseClient,orgId:string,sessionId:string,knownCatalog?:string|null):Promise<Workspace>{
- const [org,session,docs]=await Promise.all([db.from('organizations').select('catalog_revision').eq('id',orgId).single(),db.from('receiving_sessions').select('hub_id,status').eq('org_id',orgId).eq('id',sessionId).single(),db.from('documents').select('*').eq('org_id',orgId).eq('session_id',sessionId).order('created_at')]).then(r=>r.map((x:any)=>check(x)!) as any[]);
- const catalogVersion:string|null=org.catalog_revision??null,catalogUnchanged=!!catalogVersion&&knownCatalog===catalogVersion;
+ const [latest,session,docs]=await Promise.all([db.from('mv_imports').select('id').order('uploaded_at',{ascending:false}).limit(1).maybeSingle(),db.from('receiving_sessions').select('hub_id,status').eq('org_id',orgId).eq('id',sessionId).single(),db.from('documents').select('*').eq('org_id',orgId).eq('session_id',sessionId).order('created_at')]).then(r=>r.map((x:any)=>check(x)) as any[]);
+ const catalogVersion:string|null=latest?.id??null,catalogUnchanged=!!catalogVersion&&knownCatalog===catalogVersion;
  const [products,events,documents]=await Promise.all([
- catalogUnchanged?[]:catalog(db,orgId).then(c=>c.map(asProduct)),
+ catalogUnchanged?[]:catalog(db).then(c=>c.map(asProduct)),
  db.from('review_events').select('*').eq('org_id',orgId).eq('hub_id',session.hub_id).order('created_at',{ascending:true}).limit(500).then(r=>check(r)!),
  Promise.all(docs.map(async(d:any):Promise<Document>=>{
  const [pages,rows,found]=await Promise.all([db.from('source_pages').select('*').eq('org_id',orgId).eq('document_id',d.id).order('page_number'),db.from('invoice_rows').select('*').eq('org_id',orgId).eq('document_id',d.id).order('source_row'),db.from('extraction_jobs').select('status,lease_until,error,created_at').eq('org_id',orgId).eq('document_id',d.id).maybeSingle()]).then(r=>r.map((x:any)=>check(x)) as any[]);

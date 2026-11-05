@@ -23,7 +23,7 @@ Import this repository in Netlify and use its `netlify.toml`: build `npm run bui
 
 Configure the public Supabase URL/publishable key for Build scope; server Supabase URL/secret key and Anthropic key/model for Functions scope. Copy `.env.example` to ignored `.env.local` for local development. Server secrets must never use `VITE_` variables. Set the final domain in Supabase Auth settings and disable public signup.
 
-Apply all SQL files in `supabase/migrations` in filename order for a new database (for the shared armado-ch project, use `supabase/shared-project/setup.sql`). Provision a company and invited users; administrator members see all eight hubs, receivers need explicit hub assignments. RLS protects shared history and private photo/catalog storage. Internal policy helpers live in an unexposed schema; mutations are server-only.
+Apply all SQL files in `supabase/migrations` in filename order for a new database (for the shared armado-ch project, use `supabase/shared-project/setup.sql`, then the later migrations one by one). Provision a company and invited users; administrator members see all eight hubs, receivers need explicit hub assignments. RLS protects shared history and private photo/catalog storage. Internal policy helpers live in an unexposed schema; mutations are server-only.
 
 AI reads have no app-imposed daily cap or attempt limit; a receiver can retry a failed read. The job lease still prevents processing one job twice. If the Anthropic account runs out of credit, the invoice shows "Error de lectura, favor de capturar directo en Retool y contactar a José…".
 

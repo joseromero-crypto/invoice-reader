@@ -4,6 +4,7 @@ import fs from 'node:fs';
 const db=new PGlite();
 const org='10000000-0000-4000-8000-000000000011',userA='20000000-0000-4000-8000-000000000011',userB='20000000-0000-4000-8000-000000000012',admin='20000000-0000-4000-8000-000000000013';
 const sessionA='30000000-0000-4000-8000-000000000011',sessionB='30000000-0000-4000-8000-000000000012',docA='40000000-0000-4000-8000-000000000011',docB='40000000-0000-4000-8000-000000000012',docC='40000000-0000-4000-8000-000000000013',product='50000000-0000-4000-8000-000000000011',rowA='60000000-0000-4000-8000-000000000011',rowB='60000000-0000-4000-8000-000000000012',jobA='70000000-0000-4000-8000-000000000011',jobB='70000000-0000-4000-8000-000000000012';
+const mvImport='70000000-0000-4000-8000-000000000011';
 let hubA:string,hubB:string;
 beforeAll(async()=>{
  await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;
@@ -18,7 +19,7 @@ beforeAll(async()=>{
  const hubs=(await db.query<any>('select id,name from hubs where org_id=$1',[org])).rows;hubA=hubs.find(h=>h.name==='MH Contry').id;hubB=hubs.find(h=>h.name==='MH Cumbres').id;
  await db.exec(`insert into auth.users values('${userA}'),('${userB}'),('${admin}');insert into members values('${org}','${userA}','receiver'),('${org}','${userB}','receiver'),('${org}','${admin}','admin');
  insert into hub_members values('${org}','${hubA}','${userA}'),('${org}','${hubB}','${userB}');
- insert into products(id,org_id,external_id,sku,name,supplier,unit,raw) values('${product}','${org}','001','TEST','Artículo de prueba','Proveedor','pz','{}');
+ insert into mv_imports(id,source_hash,report) values('${mvImport}','test','{}');insert into mv_products(id,sku,name,base_city,calii_unit,raw,import_id) values('${product}','TEST','Artículo de prueba','Monterrey','pz','{}','${mvImport}');insert into mv_product_city(sku,city,retool_id,name,proveedor,raw,import_id) values('TEST','Monterrey','001','Artículo de prueba','Proveedor','{}','${mvImport}');
  insert into receiving_sessions(id,org_id,hub_id,created_by) values('${sessionA}','${org}','${hubA}','${userA}'),('${sessionB}','${org}','${hubB}','${userB}');
  insert into documents(id,org_id,session_id,supplier,reference,expected_pages) values('${docA}','${org}','${sessionA}','Proveedor A','A',1),('${docB}','${org}','${sessionB}','Proveedor B','B',1),('${docC}','${org}','${sessionA}',null,null,null);
  insert into invoice_rows(id,org_id,document_id,source_row,raw_source,review) values('${rowA}','${org}','${docA}',1,'{"quantity":10}','{"flags":[],"evidence":[],"resolvedFlags":[],"confirmed":false,"billedQuantity":10}'),('${rowB}','${org}','${docB}',1,'{"quantity":20}','{"flags":[],"evidence":[],"resolvedFlags":[],"confirmed":false,"billedQuantity":20}');
@@ -33,7 +34,7 @@ it('seeds all eight hubs and limits the menu to authorized memberships',async()=
  expect((await asUser(userB,'select name from hubs')).rows.map(h=>h.name)).toEqual(['MH Cumbres']);
 });
 it('shares the Masterview catalog while separating scans and history inside the same organization',async()=>{
- expect((await asUser(userA,'select * from products')).rows).toHaveLength(1);expect((await asUser(userB,'select * from products')).rows).toHaveLength(1);
+ expect((await asUser(userA,'select * from mv_products')).rows).toHaveLength(1);expect((await asUser(userB,'select * from mv_products')).rows).toHaveLength(1);
  expect((await asUser(userA,'select id from documents')).rows.map(d=>d.id).sort()).toEqual([docA,docC].sort());
  expect((await asUser(userB,`select * from documents where id='${docA}'`)).rows).toHaveLength(0);
  expect((await asUser(userA,'select * from invoice_rows')).rows).toHaveLength(1);

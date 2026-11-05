@@ -41,7 +41,7 @@ export async function extractJob(request:Request,jobId:string){
  }
  read=await transcribe(apiKey,model,images);
  const t=read.transcription;if(!t||!Array.isArray(t.rows))throw new HttpError(502,readFailure(read.error));
- const rawProducts=await catalog(db,orgId),products=rawProducts.map(asProduct);
+ const rawProducts=await catalog(db),products=rawProducts.map(asProduct);
  const result=match(t,rawProducts.map(asCatalogItem),await leanMappings(db,orgId,rawProducts));
  const supplier=result.supplier??t.supplier,reference=t.documentRef,warnings=[...result.warnings];
  if(read.error)warnings.push(`Lectura incompleta (${read.error}). Revisa que estén todos los renglones.`);

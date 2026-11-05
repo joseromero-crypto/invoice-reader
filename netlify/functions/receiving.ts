@@ -12,18 +12,18 @@ const Input=z.discriminatedUnion('action',[
  z.object({action:z.literal('document'),sessionId:uuid}),
  z.object({action:z.literal('rematch'),sessionId:uuid,documentId:uuid}),
  z.object({action:z.literal('metadata'),sessionId:uuid,documentId:uuid,supplier:z.string().trim().min(1).max(200),invoiceDate:z.string().date().nullable(),revision:z.number().int().nonnegative()}),
- z.object({action:z.literal('confirm-batch'),sessionId:uuid,documentId:uuid,rows:z.array(z.object({rowId:uuid,productId:z.string(),quantity:z.number().int().nonnegative().max(1000000),revision:z.number().int().nonnegative()})).min(1).max(500)}),
+ z.object({action:z.literal('confirm-batch'),sessionId:uuid,documentId:uuid,rows:z.array(z.object({rowId:uuid,productId:uuid,quantity:z.number().int().nonnegative().max(1000000),revision:z.number().int().nonnegative()})).min(1).max(500)}),
  z.object({action:z.literal('page'),sessionId:uuid,documentId:uuid,objectPath:z.string(),hash:z.string().regex(/^[a-f0-9]{64}$/)}),
  z.object({action:z.literal('extract'),sessionId:uuid,documentId:uuid}),
- z.object({action:z.literal('add-row'),sessionId:uuid,documentId:uuid,productId:z.string(),quantity:z.number().int().nonnegative().max(1000000),description:z.string().trim().max(500).default('')}),
+ z.object({action:z.literal('add-row'),sessionId:uuid,documentId:uuid,productId:uuid,quantity:z.number().int().nonnegative().max(1000000),description:z.string().trim().max(500).default('')}),
  z.object({action:z.literal('snapshot'),sessionId:uuid,partial:z.boolean()}),
- z.object({action:z.literal('confirm'),sessionId:uuid,documentId:uuid,rowId:uuid,productId:z.string(),quantity:z.number().int().nonnegative().max(1000000),identityChecked:z.literal(true),saveMapping:z.boolean(),corrections:CorrectionsSchema.default({}),revision:z.number().int().nonnegative()})]);
+ z.object({action:z.literal('confirm'),sessionId:uuid,documentId:uuid,rowId:uuid,productId:uuid,quantity:z.number().int().nonnegative().max(1000000),identityChecked:z.literal(true),saveMapping:z.boolean(),corrections:CorrectionsSchema.default({}),revision:z.number().int().nonnegative()})]);
 export default async function handler(request:Request){
  try{
  if(request.method!=='POST')throw new HttpError(405,'POST required');
  const {db,userId,orgId,role,token}=await authorize(request);
  const parsed=Input.safeParse(await request.json());if(!parsed.success)throw new HttpError(400,'Invalid request');const b=parsed.data;
- if(b.action==='hubs')return Response.json({hubs:await listHubs(db,orgId,userId,role)});
+ if(b.action==='hubs')return Response.json({hubs:await listHubs(db,orgId,userId,role),role});
  if(b.action==='history'){
  await requireHub(db,orgId,userId,b.hubId);
  let query=db.from('documents').select('id,session_id,supplier,reference,created_at,invoice_date,receiving_sessions!inner(hub_id,status)').eq('org_id',orgId).eq('receiving_sessions.hub_id',b.hubId).order('created_at',{ascending:false}).order('id',{ascending:false}).limit(51);
@@ -43,28 +43,26 @@ export default async function handler(request:Request){
  if(b.action==='rematch')return Response.json(await rematchDocument(db,orgId,userId,document));
  if(b.action==='metadata'){check(await db.rpc('update_scan_metadata',{p_actor:userId,p_org:orgId,p_document:b.documentId,p_supplier:b.supplier,p_invoice_date:b.invoiceDate,p_expected_revision:b.revision}));return Response.json({ok:true});}
  if(b.action==='confirm-batch'){
- const products=check(await db.from('products').select('id,external_id').eq('org_id',orgId).in('external_id',b.rows.map(r=>r.productId)))!;
- const batch=b.rows.map(r=>{const product=products.find(p=>p.external_id===r.productId);if(!product)throw new HttpError(404,'Product not found');return {...r,productId:product.id};});
- check(await db.rpc('confirm_receiving_batch',{p_actor:userId,p_org:orgId,p_document:b.documentId,p_rows:batch}));return Response.json({ok:true});}
+ check(await db.rpc('confirm_receiving_batch',{p_actor:userId,p_org:orgId,p_document:b.documentId,p_rows:b.rows}));return Response.json({ok:true});}
  if(b.action==='confirm'){
- const product=check(await db.from('products').select('id').eq('org_id',orgId).eq('external_id',b.productId).maybeSingle());if(!product)throw new HttpError(404,'Product not found');
+ const product=check(await db.from('mv_products').select('id').eq('id',b.productId).maybeSingle());if(!product)throw new HttpError(404,'Product not found');
  const before=check(await db.from('invoice_rows').select('raw_source,review').eq('org_id',orgId).eq('document_id',b.documentId).eq('id',b.rowId).maybeSingle());if(!before)throw new HttpError(404,'Row not found');
  check(await db.rpc('confirm_receiving_row',{p_actor:userId,p_org:orgId,p_document:b.documentId,p_row:b.rowId,p_product:product.id,p_quantity:b.quantity,p_identity:b.identityChecked,p_mapping:false,p_corrections:b.corrections,p_expected_revision:b.revision}))!;
  // Learn supplier code → Calii item whenever the receiver picked or changed the product; match() uses it next time.
  const supplier=before.review.mappingSupplier,keys=before.review.manual||!supplier?[]:mappingKeys(before.raw_source);
  if(keys.length&&(b.saveMapping||before.review.product?.id!==b.productId)){
- check(await db.from('supplier_mappings').upsert(keys.map(k=>({org_id:orgId,supplier,supplier_sku:k,product_id:product.id,confirmed_by:userId,confirmed_at:new Date().toISOString()})),{onConflict:'org_id,supplier,supplier_sku'}));
+ check(await db.from('supplier_mappings').upsert(keys.map(k=>({org_id:orgId,supplier,supplier_sku:k,mv_product_id:product.id,confirmed_by:userId,confirmed_at:new Date().toISOString()})),{onConflict:'org_id,supplier,supplier_sku'}));
  check(await db.from('review_events').insert({org_id:orgId,actor:userId,row_id:b.rowId,action:'Mapeo de proveedor guardado',after_value:{supplier,codes:keys,product_id:product.id}}));
  }
  return Response.json({ok:true});
  }
  if(b.action==='add-row'){
- const product=check(await db.from('products').select('id,external_id,sku,name,supplier,supplier_sku,barcode,unit').eq('org_id',orgId).eq('external_id',b.productId).maybeSingle());if(!product)throw new HttpError(404,'Product not found');
+ const product=check(await db.from('mv_products').select('id,sku,name,barcode,calii_unit,base_city,mv_product_city(city,name,barcode,proveedor,sku_proveedor)').eq('id',b.productId).maybeSingle());if(!product)throw new HttpError(404,'Product not found');const city=product.mv_product_city.find(c=>c.city===product.base_city);
  const job=check(await db.from('extraction_jobs').select('status').eq('org_id',orgId).eq('document_id',b.documentId).maybeSingle());if(job&&['queued','processing'].includes(job.status))throw new HttpError(409,'Espera a que termine la lectura.');
  // Manual rows start at 1001 so a later re-read never collides with them.
  const last=check(await db.from('invoice_rows').select('source_row').eq('org_id',orgId).eq('document_id',b.documentId).order('source_row',{ascending:false}).limit(1).maybeSingle());
  const sourceRow=Math.max(1000,last?.source_row??0)+1,description=b.description||'Agregado a mano';
- const review={sourceRow,sourcePage:null,description,supplierSku:null,barcode:null,billedQuantity:null,billedUnit:null,price:null,amount:null,proposedQuantity:b.quantity,actualQuantity:null,confirmedQuantity:null,product:{id:product.external_id,sku:product.sku,name:product.name,supplier:product.supplier,supplierSku:product.supplier_sku,barcode:product.barcode,unit:product.unit},candidates:[],evidence:[],flags:['Renglón agregado a mano'],resolvedFlags:[],conversion:'',confirmed:false,status:'review',reasons:['Renglón agregado a mano'],manual:true};
+ const review={sourceRow,sourcePage:null,description,supplierSku:null,barcode:null,billedQuantity:null,billedUnit:null,price:null,amount:null,proposedQuantity:b.quantity,actualQuantity:null,confirmedQuantity:null,product:{id:product.id,sku:product.sku,name:city?.name??product.name,supplier:city?.proveedor??'',supplierSku:city?.sku_proveedor??null,barcode:city?.barcode??product.barcode,unit:product.calii_unit??'desconocida'},candidates:[],evidence:[],flags:['Renglón agregado a mano'],resolvedFlags:[],conversion:'',confirmed:false,status:'review',reasons:['Renglón agregado a mano'],manual:true};
  const row=check(await db.from('invoice_rows').insert({org_id:orgId,document_id:b.documentId,source_row:sourceRow,raw_source:{manual:true,description},review}).select('id').single())!;
  check(await db.from('invoice_rows').update({review:{...review,id:row.id}}).eq('org_id',orgId).eq('id',row.id));
  check(await db.rpc('confirm_receiving_row',{p_actor:userId,p_org:orgId,p_document:b.documentId,p_row:row.id,p_product:product.id,p_quantity:b.quantity,p_identity:true,p_mapping:false,p_corrections:{},p_expected_revision:0}));

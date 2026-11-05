@@ -2,6 +2,7 @@
 //
 //   node --experimental-strip-types scripts/lean-bench.ts --model claude-sonnet-5-5 --run sonnet-v1
 //   node --experimental-strip-types scripts/lean-bench.ts --run sonnet-v1 --replay     (free: rematch saved reads)
+//   ... --replay --masterview "private/catalog/mv_monterrey_2026-11-03.csv"           (free: same, through the importer's parsing and whitelist)
 //
 // Paid reads go to private/lean-bench/<run>/NN-read.json. Total spend across ALL runs is tracked in
 // private/lean-bench/spend.json and the script refuses to start a call past --budget (default $3).
@@ -13,7 +14,7 @@ import { join, basename } from 'node:path';
 import { transcribe, type ReadResult } from '../lean/transcribe.ts';
 import { prepareImage } from '../lean/image.ts';
 import { match, normCode, type Proposal } from '../lean/match.ts';
-import { loadCatalogCsv } from '../lean/catalog.ts';
+import { loadCatalogCsv, loadMasterviewCsvs } from '../lean/catalog.ts';
 
 const arg = (k: string, d?: string) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
 const flag = (k: string) => process.argv.includes(`--${k}`);
@@ -36,7 +37,8 @@ for (const g of manifest.groups) for (const u of g.actualUploadOrder) invoices.p
 invoices.sort((a, b) => a.n - b.n);
 
 const catalogFile = join(ROOT, 'private/catalog/table-data - 2026-10-27T161019.962.csv');
-const catalog = loadCatalogCsv(catalogFile);
+const masterview = arg('masterview');
+const catalog = masterview ? loadMasterviewCsvs(masterview.split(',')) : loadCatalogCsv(catalogFile);
 
 const review: any[] = JSON.parse(readFileSync(join(GT, 'row-review.json'), 'utf8'));
 const vectors = JSON.parse(readFileSync(join(GT, 'independent-photo-quantities.json'), 'utf8')).vectors;

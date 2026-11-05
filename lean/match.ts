@@ -42,7 +42,7 @@ export interface MatchResult {
 export type Mappings = Map<string, string>;
 
 const clean = (v: unknown) => { const s = String(v ?? '').trim(); return s === '-' || s === "'-" ? '' : s; };
-// One Retool masterview row (CSV export, or products.raw in the database) → CatalogItem.
+// One Retool masterview row (CSV export, or the whitelisted raw columns in the database) → CatalogItem.
 export function catalogItem(r: Record<string, unknown>): CatalogItem {
   const n = parseFloat(clean(r['Peso neto o piezas (por unidad de compra)']).replace(',', '.'));
   return {
