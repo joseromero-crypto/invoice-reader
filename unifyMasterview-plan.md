@@ -1,6 +1,6 @@
 # Unify Masterview — one catalog for Armado CH, Sorting Hub, MH Recibo and Invoice Reader
 
-Status: Phases 1 and 3 done 2026-11-05. Phase 2 is built and tested; retiring `products` and the first upload wait for the deploy. The rest is not built. Written 2026-11-03 from the code in the four repos and the all-cities export
+Status: Phases 1, 2 and 3 done 2026-11-05, and the first real upload is published. Phase 4 (the readers) is next; until then no other app reads `masterview/`. Written 2026-11-03 from the code in the four repos and the all-cities export
 (`table-data - 2026-11-03T101825.372.csv`, which had the wrong column set; see §0).
 
 This file lives in all four repos (armado-CH, sorting-hub, mh-recibo, calii-invoice-reader), as
@@ -206,18 +206,18 @@ project).
 
 ## Phase 2: Shared catalog + the one importer (repo `calii-invoice-reader`)
 
-**Result: built 2026-11-05, committed, not deployed.** The steps below are kept as the record of what was planned.
+**Result: done 2026-11-05.** The steps below are kept as the record of what was planned.
 
-- **Left to do, in this order:**
-  1. Jose reviews the test import report below, then pushes.
-  2. After the deploy, Jose runs `supabase/migrations/20261105130000_retire_products.sql` in the SQL editor. Not before: the
-     code now live reads `products`. It stops, changing nothing, if a mapping has no Masterview product.
-  3. Jose does the first real upload in Invoice Reader → Masterview. That's what publishes `masterview/latest.json`. Use
-     fresh exports (see "Data").
-- **What's in the project now:** `20261105120000_masterview_shared.sql` applied (additive; live site unaffected). One test
-  import of the four 11-03 files: 5,492 products, 18,612 city rows, raw CSVs at `catalogs/masterview/{city}/latest.csv`.
-  **Nothing published:** the `masterview` bucket is empty. `hubs.city` seeded; "Pruebas de facturas" has no city.
-- **Test import report:** Monterrey 4,896 / Saltillo 4,714 (+56 exclusive, 238 missing vs Monterrey) / CDMX 4,528 (+302, 670
+- **Where it runs:** deployed to `https://invoicereader.joseromero.co`. `products`, `catalog_imports`, `product_id` and the old functions
+  are retired. The deploy first failed Netlify's secret scan: this file held the full Supabase URL, which equals the
+  `SUPABASE_URL` value. Use the project ref in tracked files.
+- **First real upload:** Jose, from the Masterview screen, all four cities. The run took 70 s, and `latest.json` and `version.txt`
+  are public and agree (version `0e330dae`, 5,492 products, 48 `alt` keys, 8 hubs in `hubCities`). 72 products updated, 0 added,
+  0 retired, 36 SKUs change name between cities, 56 barcodes with more than one SKU, no warnings. ZYZ063 is in `map`. All 11
+  mappings point to current products. The 5 values that were older in the 11-03 files are current again.
+- **Not checked yet:** an invoice read and confirm on the deployed site since the switch.
+- **Left in the project:** the test import's `mv_imports` row, which is harmless.
+- **Test import report (11-03 files, before the first upload):** Monterrey 4,896 / Saltillo 4,714 (+56 exclusive, 238 missing vs Monterrey) / CDMX 4,528 (+302, 670
   missing) / Guadalajara 4,474 (+302, 724 missing). 29 SKUs change name between cities, 56 barcodes belong to more than one
   SKU, 0 retired, no warnings. Full report: `private/catalog/mv-test-import-report.json`.
 - **Remap:** 11 of 11 `supplier_mappings` mapped, no SKU changed, 0 unmapped. `quantity_conversions` has 0 rows.
@@ -228,8 +228,6 @@ project).
   purchase unit on VWJ653, KFE338, PSH792, PDK723, and the name of ABP084.
 - **Timing:** the four-file import took about 46 s locally, plus 11 s of upload. `read_mv_catalog` takes 1.9 s and 9 MB, down
   from ~11 s and 22 MB. `latest.json` would be 2.0 MB, not the 1.5 MB estimated.
-- **Not tested live:** the screen and the background function with a real session (a Google sign-in is needed). The screen
-  was checked with stubbed data; the functions by tests, including the admin refusal and the publish order.
 - **Changed from the plan:**
   - `product_id` is replaced by a new column `mv_product_id` instead of being swapped in place, and retiring is a separate
     migration. So old and new code both work until the retire migration runs, and `confirm_receiving_row_v1` accepts both ids.
