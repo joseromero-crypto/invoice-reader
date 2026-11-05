@@ -40,6 +40,7 @@ The full per-row report is in `private/lean-bench/sonnet-v2/REPORT.md`.
 - Don't add features to the model's output. If something can be computed from the transcription plus the catalog, compute it in code.
 - Keep the human confirmation step. Never auto-post to Retool.
 - Keep docs short: update this file instead of writing new handoff files. No hash audits.
+- Never write the full Supabase URL in a tracked file: it matches the `SUPABASE_URL` env var, and Netlify's secret scan fails the deploy. Use the project ref.
 - Git: committing is fine. **Don't push from the terminal.** Jose pushes with GitHub Desktop.
 - Answer keys (`private/testing/clear-photos-20261028/*`) are for scoring only. Never put them into a prompt.
 

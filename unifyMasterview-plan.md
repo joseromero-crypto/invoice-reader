@@ -171,7 +171,7 @@ the other three.
 project).
 
 1. Check `SUPABASE_URL` / `VITE_SUPABASE_URL` in `.env.local` and in the Netlify site's env vars.
-   - If both are already `https://uuqqtksxlgkztenojufm.supabase.co`, **skip to Phase 2**.
+   - If both already point to project `uuqqtksxlgkztenojufm`, **skip to Phase 2**.
    - Otherwise, continue.
 2. **Check for name collisions in the target project** before applying anything. List the existing
    tables, functions, triggers and buckets in `uuqqtksxlgkztenojufm`.
