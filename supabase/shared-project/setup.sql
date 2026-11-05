@@ -324,6 +324,12 @@ do $$declare t text;begin foreach t in array array['organizations','members','ca
  execute format('grant select,insert,update,delete on public.%I to service_role',t);
 end loop;end$$;
 
+-- ===== 20261104130000_catalog_statement_timeout.sql =====
+-- The API's default statement timeout is too short for a whole Masterview in one transaction.
+-- PostgREST applies a function's statement_timeout to the call, so only these two get more time.
+alter function public.import_masterview(uuid,uuid,text,jsonb,jsonb,uuid) set statement_timeout='120s';
+alter function public.read_catalog_snapshot(uuid) set statement_timeout='60s';
+
 -- ===== The one company (same id as the old project). Its trigger seeds the eight hubs. =====
 insert into public.organizations(id,name) values('956effb3-2c8d-4ea2-a01f-d9fbdba2b315','Calii');
 
