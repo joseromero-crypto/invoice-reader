@@ -57,7 +57,7 @@ The full per-row report is in `private/lean-bench/sonnet-v2/REPORT.md`.
 - Match rules added from live tests (Nov 2): an unlabeled quantity column whose sum equals a printed pieces total ("PIEZAS EN VENTA") counts pieces (Bimbo: 7 → 0 review rows); the whole-catalog supplier-code fallback only accepts items whose name resembles the description (Arca "14" no longer hits other suppliers' items).
 - Learned: the bench photos are 4096×3072 and the API already downscaled them, so ≤2576 px gives the same reads at the same cost (invoices 4, 10, 12 re-run as `sonnet-v2-2576`: 69/69 quantities, same identity).
 
-**Move to the shared armado-ch project (`unifyMasterview-plan.md` Phase 1) — applied Nov 4, live read passed locally.** `.env.local` points to armado-ch (`uuqqtksxlgkztenojufm`); the Netlify site still points to the old project until Jose switches it. Keep the old project for a week after that.
+**Move to the shared armado-ch project (`unifyMasterview-plan.md` Phase 1) — done Nov 5.** `.env.local` and the Netlify site (`https://invoicereader.joseromero.co`) both point to armado-ch (`uuqqtksxlgkztenojufm`); a live sign-in and read landed there (Mission Foods 5004590079). Don't delete the old project.
 - `supabase/shared-project/setup.sql` is generated from `supabase/migrations` and was already run. Later migrations go to the SQL editor one by one. `tests/shared-project-setup.test.ts` runs it against a stand-in with another app's objects.
 - `private/shared-project/after-first-sign-in.sql` made Jose admin and carried the 11 mappings and their products.
 - This database is shared: never write a migration that loops over all functions or tables in `public`.
