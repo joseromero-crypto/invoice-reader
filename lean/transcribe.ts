@@ -11,7 +11,9 @@ export interface TranscribedRow {
   quantities: (string | null)[];       // aligned with Transcription.quantityColumns
   unit: string | null;                 // separate printed unit column (U.M., UNIDAD...) if any
   mark: Mark;                          // handwritten mark beside the row
-  note: string | null;                 // handwritten number/text, unclear mark description
+  note: string | null;                 // handwritten text, unclear mark description
+  handQuantities?: (string | null)[];  // handwritten count replacing quantities[i]; absent in reads saved before Nov 6
+  handDelta?: string | null;           // handwritten adjustment such as "-2", usually beside the code
 }
 
 export interface Transcription {
@@ -34,9 +36,11 @@ Rules:
 - Several photos may show the same page or overlapping parts. Output each printed product line ONCE. Separate printed lines of the same product stay separate.
 - codes: every identifier on the row with the exact column header it sits under (e.g. "CODIGO INTERNO", "CLAVE", "COD. BARRAS", "CVEPROD", "CLAVE PROD. SERV."). If the description itself starts with a product code (e.g. "1152 T CH AGUA MINERAL 600 ML"), also add that code with header "DESCRIPCION". If digits that look like a barcode appear inside the description, add them with header "DESCRIPCION". Keep leading zeros and every digit.
 - description: the printed description text (without a leading code you already put in codes).
-- quantityColumns: the literal headers of the columns that hold item quantities (e.g. ["CAJAS","PIEZAS"], ["CANTIDAD (CAJAS-ZZ)","CANTIDAD (CAJAS-EA)"], ["CANT."]). Not prices, not amounts, not package sizes inside the description. quantities[i] is the literal number printed in quantityColumns[i] on that row, or null if empty/unreadable.
+- quantityColumns: the literal headers of the columns that hold item quantities (e.g. ["CAJAS","PIEZAS"], ["CANTIDAD (CAJAS-ZZ)","CANTIDAD (CAJAS-EA)"], ["CANT."]). Not prices, not amounts, not package sizes inside the description. quantities[i] is the literal number printed in quantityColumns[i] on that row, or null if empty/unreadable. Always the printed number, even when it is struck through.
+- handQuantities: aligned with quantityColumns. A receiver who counted a different amount writes it by hand: the printed number struck through or overwritten with a number next to it, or a number simply written beside the printed one. handQuantities[i] is that handwritten number for quantityColumns[i], else null. Ticks, dashes and X marks are not numbers.
+- handDelta: a signed handwritten adjustment on the row (e.g. "-2", "-1", "+3"), usually written beside the code or description, as written with its sign, else null. A dash with no digit after it is a mark, not a delta.
 - unit: the separate unit-of-measure column value (U.M., UNIDAD, UNID) if the table has one, or the unit word printed with that row's quantity (e.g. "PIEZA(S)"), else null.
-- mark: the handwritten mark beside that row. "check" = a tick (✓). "cross" = an X or crossed-out row. "none" = no handwriting on the row. "other" = circle, line, handwritten number, or anything unclear. Follow the printed row's own slope to decide which row a mark belongs to. Put any handwritten number or a short description of an unclear mark in note, else null.
+- mark: the handwritten mark beside that row. "check" = a tick (✓). "cross" = an X or crossed-out row. "none" = no handwriting on the row. "other" = circle, line, or anything unclear. Follow the printed row's own slope to decide which row a mark belongs to. A row with a handwritten quantity still gets the mark beside it. Put handwritten words or a short description of an unclear mark in note, else null.
 - Trace each row from its code across to its quantity along the same printed line before writing it; tables are often photographed sideways or tilted.
 - Some tickets print the quantity next to the price with no space (e.g. "127.206 763.20" = price 127.20, quantity 6) and/or spell it in words (e.g. "SEIS PIEZA(S)"). When words are printed, the number you write must agree with them.
 - printedTotals: any printed quantity totals (e.g. "TOTAL PIEZAS 250", "TotalCajas 41", "PIEZAS: 250") with the label as printed; empty if none. Do not compute totals yourself.
@@ -63,7 +67,7 @@ export const SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['photo', 'codes', 'description', 'quantities', 'unit', 'mark', 'note'],
+        required: ['photo', 'codes', 'description', 'quantities', 'handQuantities', 'handDelta', 'unit', 'mark', 'note'],
         properties: {
           photo: { type: 'integer' },
           codes: {
@@ -75,6 +79,8 @@ export const SCHEMA = {
           },
           description: { type: 'string' },
           quantities: { type: 'array', items: nullableString },
+          handQuantities: { type: 'array', items: nullableString },
+          handDelta: nullableString,
           unit: nullableString,
           mark: { type: 'string', enum: ['check', 'cross', 'none', 'other'] },
           note: nullableString,

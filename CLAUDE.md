@@ -14,21 +14,24 @@ Receivers photograph a supplier invoice or remission at a hub. The app turns it 
 
 ## The lean design (built in `lean/`)
 
-1. **`lean/transcribe.ts`: one model call per invoice that only copies the printed table.** It returns codes with their column headers, the description, every quantity column with its header, the unit, printed totals, and the handwritten mark (check / cross / none / other). It makes no product decisions. Settings: Sonnet 5.5, `between_tools`, effort low, all photos of the invoice in one request.
+1. **`lean/transcribe.ts`: one model call per invoice that only copies the printed table.** It returns codes with their column headers, the description, every quantity column with its header, the unit, printed totals, the handwritten mark (check / cross / none / other), and any handwritten count (`handQuantities`, `handDelta`). It makes no product decisions. Settings: Sonnet 5.5, `between_tools`, effort low, all photos of the invoice in one request.
 2. **`lean/match.ts`: deterministic code, no cost.**
    - Supplier = the catalog supplier whose barcodes/SKUs explain the most rows.
-   - Identity order: confirmed mapping → barcode → supplier SKU (that supplier first, then the whole catalog, because distributors like Alpura deliver other brands) → description *candidates*. A description match never auto-selects a product.
+   - Identity order: barcode → supplier SKU (that supplier first, then the whole catalog, because distributors like Alpura deliver other brands) → saved mapping → description *candidates*. A description match never auto-selects a product.
+   - **Only an exact Masterview match can be `ok`**: a barcode, or this supplier's SKU. A saved mapping is one person's earlier pick and could be wrong, so it only pre-fills the product on a `review` row, and it never beats Masterview (a disagreement is shown on the row). Another supplier's code with a similar name is `review` too. Don't relax this to get more bulk-confirmable rows: fix SKU Proveedor in Retool instead.
    - Fiscal codes (CVEPROD / Clave Prod. Serv. / 5xxxxxxx) are never used for matching.
    - Quantity: use the PIEZAS column if printed, cross-checked against cajas × catalog pieces per caja. Otherwise cajas × catalog factor. Otherwise flag the row.
-   - Printed totals and RENGLONES are checked against the rows that were read. A mismatch blocks bulk confirm.
-   - Status: `ok` (bulk-confirmable), `review` (each reason in Spanish) or `excluded` (crossed out on the invoice).
+   - **Handwriting rules over printing.** Receivers correct three ways: printed number struck through with one beside it, a number just written beside it, or a signed adjustment ("-2") by the code. The corrected number becomes the quantity and the row always goes to `review`. `row.quantities` stays printed, so printed totals still check.
+   - Marks: a mark repeated down the page means the row was looked at, not a problem. It counts as a tick if it is on every row that isn't crossed out, or if it is a dash or highlighter on at least half of them (`pageMarks`). No marks at all counts the same. An odd mark among ticks, an unticked row among ticks, and a written "NO" still go to `review`. Every row crossed out goes to `review`, not `excluded`.
+   - Printed totals and RENGLONES are checked against the rows that were read. A mismatch blocks bulk confirm. Totals with the same label are also checked added together, for two invoices in one upload (LALA CWB-02774809 + 810: 214 + 14 = 228).
+   - Status: `ok` (exact Masterview match, bulk-confirmable), `review` (each reason in Spanish) or `excluded` (crossed out on the invoice).
 3. **Human:** confirms `ok` rows in bulk, resolves `review` rows one by one, and can add a row by hand. Each confirmed supplier code → Calii item is saved to `supplier_mappings` and used by `match()` next time.
 
 ## Measured result (Nov 2, 13 verified invoices / 238 rows, one frozen prompt)
 
 The full per-row report is in `private/lean-bench/sonnet-v2/REPORT.md`.
 
-- **Quantities: 238/238 correct**, including all 31 Arca rows that the old reader got wrong.
+- **Quantities: 238/238 correct**, including all 31 Arca rows that the old reader got wrong. Correction (Nov 6): the key holds the printed number on invoice 1 rows 5, 8, 13 and 18, where the receiver wrote what arrived (8, 2, 4, 1). `sonnet-v3` reads those correctly and so scores 234/238; the 4 "misses" are the key's. Don't fix them by going back to printed.
 - **Identity: 212/238 match the old answer key.** Spot checks show the old key was wrong in at least 3 places where the lean result was right (Coca-Cola 2.5L, Ocean Spray, Alpura natural 900g). The rest are rows with no usable code in the catalog: they get description candidates and need one human pick, then the mapping is saved.
 - **201 rows were bulk-confirmable**, and no auto-confirmed row was found wrong. All 6 crossed-out rows were excluded, including invoice 3 row 13, which the old reader missed.
 - **Cost: $0.567 for all 13 invoices (~$0.044 per invoice); about 13 s average per invoice.** Haiku 5.5 costs ~$0.002 per invoice but misread quantities (219/238) and gave 4 wrong auto-confirms, so don't use it for this.
@@ -68,9 +71,17 @@ The full per-row report is in `private/lean-bench/sonnet-v2/REPORT.md`.
 
 **Shared Masterview (`unifyMasterview-plan.md` Phases 2–3) — done Nov 5, first real upload published.** The catalog is `mv_imports` / `mv_products` / `mv_product_city`; `sku` is the product key and Invoice Reader product ids are `mv_products.id`.
 - Admin screen `src/Masterview.tsx` → `netlify/functions/catalog.ts` → `catalog-background.ts` → `server/masterview.ts`. Parsing and the column whitelist are in `shared/catalog.ts`; `planImport` and `buildLatest` in `shared/masterview.ts` are pure. `import_mv` writes everything in one transaction.
-- Matching is city-aware (Phase 4.4, done Nov 5): `catalog(db, city)` in `server/workspace.ts` reads the hub's city with `read_mv_catalog` and the other cities in slim pages, and `cityItems` in `lean/catalog.ts` marks other cities' rows `otherCity`. `match()` uses the hub's rows first; another city's product is only ever a labelled candidate in `review`. A hub with no `city` reads Monterrey only (`MATCH_CITY`). A barcode on two SKUs in any city needs the supplier code to auto-confirm. `load`'s `catalogVersion` is the latest `mv_imports.id`, and the browser caches the catalog per hub.
+- Matching is city-aware (Phase 4.4, done Nov 5): `catalog(db, city)` in `server/workspace.ts` reads all cities in slim pages, and `cityItems` in `lean/catalog.ts` marks other cities' rows `otherCity`. `match()` uses the hub's rows first; another city's product is only ever a labelled candidate in `review`. A hub with no `city` reads Monterrey only (`MATCH_CITY`). A barcode on two SKUs in any city needs the supplier code to auto-confirm. `load`'s `catalogVersion` is the latest `mv_imports.id`, and the browser caches the catalog per hub.
 - `supabase/shared-project/setup.sql` stops at Phase 1; run later migrations one by one. Both Masterview migrations are applied.
 - `scripts/mv-import.ts` is a test import that never publishes. `scripts/mv-compare.ts` is the Phase 3 check. `lean-bench.ts --replay --masterview <city csvs, comma-separated> [--city Saltillo]` scores through the importer's parser and whitelist, as a hub in that city (default Monterrey).
+
+**Field fixes (Nov 6, from the first real tests):**
+- Catalog read: `read_mv_catalog` built ~9 MB of JSON in one statement: 4.5 s alone, 19 s with two at once, past its 60 s limit with three. That was the Cumbres "statement timeout" / "upstream request timeout" family. `catalog()` no longer calls it: it reads every city in pages, 3 at a time, retrying a cut-off page (5 at once: 5 s, no failures). The worker loads the catalog while the model reads. Don't go back to a one-statement catalog read on this project.
+- Handwriting and page marks: see the design above. Prompt now `sonnet-v3` on the bench (quantities unchanged on the 12 other invoices, no false corrections, ~$0.048 per invoice).
+- Alpura: 14 of the 28 codes printed on the two bench invoices aren't in Masterview's SKU Proveedor in any city (e.g. printed YOBT910, catalog YOBT700), and Alpura prints no barcodes. Mappings pre-fill 9 of them for a person to verify, so those rows need one tap each (real invoice WP 998007: 6 `ok`, 10 to verify). Real fix: correct SKU Proveedor in Retool, which makes them `ok`.
+- Report for commercial: Masterview screen → "Sin coincidencia en Masterview" (`src/UnmatchedReport.tsx`, `catalog` action `unmatched`, `server/unmatched.ts`, `lean/unmatched.ts`). Re-runs `match()` on the newest 200 saved reads with the current catalog and mappings and lists every row whose `gap` isn't null, per supplier and city, with the SKU a person chose. A code drops off once Masterview has it. An invoice read twice counts once. Codes appear exactly as printed (`*796` is Arca's mark for 0% tax rows), so commercial can quote them; matching ignores the symbols and leading zeros. Excel download is the main one (`src/lib/xlsx.ts`, every code a text cell); plain CSV also exists, but Excel hides leading zeros in it, and an `="..."` wrapper shows up literally in other apps, so don't use that. It runs in a normal function call (about 8 s estimated at 200 reads), so if it needs more history, move it to a background function rather than raising the limit.
+- A row with no Masterview match and no saved pick stays blank, with up to 3 description suggestions in the picker. Don't pre-select a guess: one tap would confirm it and save it as a mapping.
+- Tuesday Nov 3 reads are on the old Supabase project, which this repo no longer has keys for.
 
 **Phase 4 — delete the old reader** once Phases 2–3 work end to end. Remove `server/invoice-*.ts` (except whatever Phase 2 still imports), `shared/annotation-association.ts`, `shared/quantity-alignment.ts`, `shared/printed-reading.ts`, `shared/basic-reading.ts`, the old paid/eval scripts (`scripts/basic-*`, `smoke-invoice.ts`, `evaluate-*`, `verify-*`, `validate-basic-history.ts`) and their tests. Nothing live imports them any more; also unused now: `server/match-extraction.ts`, `server/extraction-failure.ts`, `shared/receiving-policy.ts`, `shared/quantity-review.ts`, `shared/matching.ts` (except `supplierKey`, used by `shared/catalog.ts`). Keep auth, hubs, catalog upload, domain/export.
 
@@ -93,7 +104,7 @@ npm ci && npm run dev                       # app (Node 24)
 npm test                                    # unit tests (tests/lean-match.test.ts covers the lean rules)
 set -a; . ./.env.local; set +a
 node --experimental-strip-types scripts/lean-bench.ts --run my-try           # paid, ~$0.57
-node --experimental-strip-types scripts/lean-bench.ts --run sonnet-v2 --replay   # free re-score
+node --experimental-strip-types scripts/lean-bench.ts --run sonnet-v3 --replay   # free re-score
 ```
 
 Spend across all bench runs is logged in `private/lean-bench/spend.json`.

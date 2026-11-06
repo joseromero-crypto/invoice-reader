@@ -1,7 +1,8 @@
 // Lean reader, step 2: deterministic matching + quantity rules. No AI, no cost.
 // Input: a Transcription (lean/transcribe.ts) and the Calii catalog.
 // Output: one proposal per row with a status the review screen can act on:
-//   ok       → identity by barcode/supplier SKU, quantity resolved, row ticked. Bulk-confirmable.
+//   ok       → exact Masterview match (barcode, or this supplier's SKU), quantity resolved, row ticked (see pageMarks).
+//              Bulk-confirmable. Nothing else may be ok: a saved mapping is one person's earlier pick, not Masterview.
 //   review   → something needs a human (reasons say what). Never auto-confirmed.
 //   excluded → row crossed out on the invoice. Left out of the receiving list by default.
 
@@ -31,6 +32,7 @@ export interface Proposal {
   quantityBasis: string;
   status: 'ok' | 'review' | 'excluded';
   reasons: string[];
+  gap: string | null;    // why Masterview couldn't answer this row by itself; null = exact match. For the report to commercial.
 }
 
 export interface MatchResult {
@@ -87,17 +89,22 @@ export function mappingKeys(row: TranscribedRow): string[] { const c = rowCodes(
 export const mappingSupplier = (r: MatchResult, t: Transcription) => r.supplier ?? t.supplier?.trim() ?? '';
 
 // ---------- description similarity (fallback suggestions only) ----------
+// Invoice shorthand → the word the catalog uses (Alpura prints "YOGHURT BAT FRESA", "LECHE DESL").
+const SHORTHAND: Record<string, string> = { bat: 'batido', beb: 'bebible', desl: 'deslactosado', deslactosada: 'deslactosado', yog: 'yoghurt', yogurt: 'yoghurt', mant: 'mantequilla', ent: 'entera', crrco: 'carranco' };
 function tokens(s: string): Set<string> {
   const t = fold(s)
     .replace(/(\d+(?:[.,]\d+)?)\s*(ml|lt|l|g|gr|grs|kg|oz|pz|pzs)\b/g, (_, n, u) => ` ${String(parseFloat(n.replace(',', '.')))}${u === 'gr' || u === 'grs' ? 'g' : u === 'lt' ? 'l' : u === 'pzs' ? 'pz' : u} `)
     .split(/[^a-z0-9.]+/).filter(w => w.length > 1 && !['de', 'con', 'sin', 'nr', 'pet', 'la', 'el', 'pz'].includes(w));
-  return new Set(t);
+  return new Set(t.map(w => SHORTHAND[w] ?? w));
 }
 function similarity(a: Set<string>, b: Set<string>) {
   let hit = 0; for (const w of a) if (b.has(w)) hit += /\d/.test(w) ? 2 : 1; // sizes weigh double
   let tot = 0; for (const w of a) tot += /\d/.test(w) ? 2 : 1;
   return tot ? hit / tot : 0;
 }
+
+// Tokenizing 18,000 catalog names took most of a match() call, and a catalog item never changes once read.
+const nameTokens = new WeakMap<CatalogItem, Set<string>[]>();
 
 // ---------- quantities ----------
 const num = (s: string | null | undefined) => {
@@ -108,8 +115,34 @@ const isCaseHeader = (h: string) => /CAJ|\bCJ\b|BULTO|\bCS\b/i.test(h);
 const pieceUnit = (u: string | null) => !!u && /^(PZ|PZA|PZAS|PIEZA|PIEZAS|PIEZA\(S\)|EA|H87|UNIDAD|UN|UND)$/i.test(u.trim());
 const caseUnit = (u: string | null) => !!u && /CAJ|^CJ$|XBX|^CS$/i.test(u.trim());
 
+// Handwriting rules over printing: a number written by the receiver, or a signed adjustment ("-2"), replaces the
+// printed quantity. Printed columns that weren't corrected are dropped so a stale PIEZAS can't win over corrected
+// CAJAS. row.quantities stays printed, so the printed totals still check against it.
+function handwritten(row: TranscribedRow, printed: (number | null)[]): { vals: (number | null)[]; note: string } | null {
+  const written = printed.map((_, i) => num(row.handQuantities?.[i]));
+  const delta = num(row.handDelta);
+  const changed = written.findIndex((v, i) => v != null && v !== printed[i]);
+  const known = printed.flatMap((v, i) => v == null ? [] : [i]);
+  if (changed >= 0) {
+    const before = printed[changed], after = written[changed]!;
+    const off = delta != null && before != null && before + delta !== after ? `, pero la marca ${row.handDelta} da ${before + delta}` : '';
+    return { vals: written, note: `corregido a mano: impreso ${before ?? 'vacío'}, escrito ${after}${off}` };
+  }
+  if (!delta) return null;
+  if (known.length !== 1 || printed[known[0]]! + delta < 0) return { vals: printed, note: `marca a mano ${row.handDelta}: ajusta la cantidad` };
+  const before = printed[known[0]]!;
+  return { vals: printed.map((v, i) => i === known[0] ? before + delta : v), note: `corregido a mano: impreso ${before}, marca ${row.handDelta}` };
+}
+
 export function quantity(row: TranscribedRow, cols: string[], item: CatalogItem | null): { q: number | null; basis: string; ok: boolean; note?: string } {
-  const vals = cols.map((_, i) => num(row.quantities?.[i]));
+  const printed = cols.map((_, i) => num(row.quantities?.[i]));
+  const hand = handwritten(row, printed);
+  const q = fromColumns(row, cols, hand?.vals ?? printed, item);
+  // A hand-corrected quantity is always read by a person, whatever the conversion says.
+  return hand ? { ...q, ok: false, note: q.note ? `${hand.note}; ${q.note}` : hand.note } : q;
+}
+
+function fromColumns(row: TranscribedRow, cols: string[], vals: (number | null)[], item: CatalogItem | null): { q: number | null; basis: string; ok: boolean; note?: string } {
   const pi = cols.findIndex((h, i) => isPieceHeader(h) && vals[i] != null);
   const ci = cols.findIndex((h, i) => isCaseHeader(h) && vals[i] != null);
   const n = item?.perPurchaseUnit ?? null;
@@ -132,6 +165,26 @@ export function quantity(row: TranscribedRow, cols: string[], item: CatalogItem 
   if (inCases) return { q: v * n!, basis: `${v} cajas × ${n} pz/caja (catálogo)`, ok: true };
   if (pieceUnit(row.unit)) return { q: v, basis: `${v} ${row.unit}`, ok: true };
   return { q: v, basis: `${cols[oi]} ${v}`, ok: false, note: `¿${v} piezas o ${v} cajas (= ${v * n!} pz)? El catálogo compra por caja de ${n}` };
+}
+
+// ---------- marks ----------
+// What a repeated mark looks like in a read: the same highlighter comes back as "code highlighted in yellow" or
+// "yellow highlighter on code", and as mark "other" or "none", from one read to the next.
+function markKind(row: TranscribedRow): string | null {
+  const note = fold(row.note ?? '').trim();
+  if (row.mark === 'check' || row.mark === 'cross' || !note || /\d|\bno\b|falt|devuel|rechaz/.test(note)) return null;
+  if (/highlight|yellow|marcatexto|resaltad|amarill/.test(note)) return 'highlight';
+  if (/dash|line|stroke|guion|raya/.test(note)) return 'dash';
+  return note;
+}
+// A mark repeated down the page says the row was looked at, not that something is wrong with it, so it counts as a
+// tick: any mark on every row that isn't crossed out, a dash or highlighter on at least half of them (Cumbres ticks
+// LALA with dashes). A page with no marks at all has nothing to compare, so it isn't a reason to stop on every row.
+function pageMarks(rows: TranscribedRow[]): { neutral: Set<string>; unmarked: boolean; allCrossed: boolean } {
+  const open = rows.filter(r => r.mark !== 'cross'), kinds = new Map<string, number>();
+  for (const r of open) { const k = markKind(r); if (k) kinds.set(k, (kinds.get(k) ?? 0) + 1); }
+  const neutral = [...kinds].filter(([k, n]) => n >= 2 && (n === open.length || (['dash', 'highlight'].includes(k) && n * 2 >= open.length))).map(([k]) => k);
+  return { neutral: new Set(neutral), unmarked: open.length >= 2 && open.every(r => r.mark === 'none'), allCrossed: rows.length >= 2 && !open.length };
 }
 
 // ---------- main ----------
@@ -158,6 +211,7 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
     return sum > 0 && total ? `${h} (piezas: suma = ${total.label} ${num(total.value)})` : h;
   });
   const codes = rows.map(rowCodes);
+  const marks = pageMarks(rows);
 
   // Supplier: the catalog supplier whose barcodes/SKUs explain the most rows (printed legal names often
   // differ from catalog names, e.g. "Comercializadora de Lácteos" = LALA). Fall back to the printed name.
@@ -181,7 +235,11 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
   const supplier = vote({ barcode: byBarcode, sku: skuGlobal }) ?? printedName(local) ?? vote(everywhere) ?? printedName(catalog);
   const pool = supplier ? local.filter(c => c.supplier === supplier) : local;
   const bySku = index(pool).sku;
-  const withTokens = (it: CatalogItem) => [it, [it.name, ...(it.aliases ?? [])].map(tokens)] as const;
+  const withTokens = (it: CatalogItem) => {
+    let names = nameTokens.get(it);
+    if (!names) nameTokens.set(it, names = [it.name, ...(it.aliases ?? [])].map(tokens));
+    return [it, names] as const;
+  };
   const poolTokens = pool.map(withTokens);
   // Description candidates also cover products the hub's city doesn't have, once each.
   const localIds = new Set(local.map(c => c.id));
@@ -197,10 +255,11 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
 
     const mapSupplier = supplier ?? t.supplier?.trim() ?? '';
     const mappedAway: CatalogItem[] = [];
+    let mapped: CatalogItem | null = null;
     for (const k of [...keys, ...barcodes]) {
       const id = mappings.get(`${mapSupplier}|${k}`); if (!id) continue;
       const hit = local.find(c => c.id === id);
-      if (hit) { item = hit; matchedBy = 'mapping'; break; }
+      if (hit) { mapped = hit; break; }
       mappedAway.push(...catalog.filter(c => c.id === id));
     }
     const bcHits = [...new Set(barcodes.flatMap(b => byBarcode.get(b) ?? []))];
@@ -208,11 +267,17 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
     const desc = tokens(row.description ?? '');
     // Distributors (e.g. Alpura routes) also deliver other brands: fall back to the whole catalog, but only
     // to items whose name resembles the printed description (short codes like "14" repeat across suppliers).
-    if (!skuHits.length) skuHits = [...new Set(keys.flatMap(k => skuGlobal.get(k) ?? []))].filter(it => similarity(desc, tokens(it.name)) >= 0.3);
+    // A name that merely resembles the description is not an exact match, so these rows are never ok.
+    const ownSku = skuHits.length > 0;
+    if (!ownSku) skuHits = [...new Set(keys.flatMap(k => skuGlobal.get(k) ?? []))].filter(it => similarity(desc, tokens(it.name)) >= 0.3);
     if (!item && bcHits.length === 1) { item = bcHits[0]; matchedBy = 'barcode'; }
     else if (!item && bcHits.length > 1) reasons.push('código de barras en varios productos del catálogo');
     if (!item && skuHits.length === 1) { item = skuHits[0]; matchedBy = 'supplierSku'; }
     else if (!item && skuHits.length > 1) reasons.push('clave de proveedor en varios productos');
+    if (item && matchedBy === 'supplierSku' && !ownSku) reasons.push(`la clave es de otro proveedor en Masterview (${item.supplier}); confirma el producto`);
+    // Masterview decides. A saved mapping only fills in the product when Masterview has no answer, and a person checks it.
+    if (item && mapped && mapped.id !== item.id) reasons.push(`un mapeo guardado dice otro producto (${mapped.name}); se usó Masterview`);
+    if (!item && mapped) { item = mapped; matchedBy = 'mapping'; reasons.push('sin coincidencia en Masterview: producto de un mapeo guardado, verifícalo'); }
     if (item && matchedBy === 'barcode' && skuHits.length && !skuHits.includes(item)) reasons.push(`clave ${keys.join('/')} apunta a otro producto (${skuHits[0].name}); se usó el código de barras`);
     // Masterview gives this barcode to another SKU too (in any city): the barcode alone can't confirm the product.
     const sameBarcode = item && matchedBy === 'barcode' && !skuHits.includes(item)
@@ -230,20 +295,31 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
     let candidates = item ? [] : rank(poolTokens);
     if (!item && (candidates[0]?.score ?? 0) < 0.5) candidates = [...candidates, ...rank(allTokens)].sort((a, b) => b.score - a.score).filter((c, k, a) => a.findIndex(x => x.id === c.id) === k).slice(0, 3);
     for (const c of bcHits.length > 1 ? bcHits : skuHits.length > 1 ? skuHits : []) candidates.unshift(candidate(c, 1));
-    candidates = [...away, ...sameBarcode].map(c => candidate(c, 1)).concat(candidates).filter((c, k, a) => a.findIndex(x => x.id === c.id) === k);
+    const disputed = mapped && mapped.id !== item?.id ? [mapped] : [];
+    candidates = [...away, ...sameBarcode, ...disputed].map(c => candidate(c, 1)).concat(candidates).filter((c, k, a) => a.findIndex(x => x.id === c.id) === k);
     if (!item && !away.length) reasons.push(candidates.length ? 'elegir producto (sin código coincidente)' : 'producto no encontrado en catálogo');
+
+    const exact = matchedBy === 'barcode' || (matchedBy === 'supplierSku' && ownSku);
+    const gap = !barcodes.length && !keys.length ? 'Sin código en la factura'
+      : bcHits.length > 1 || skuHits.length > 1 ? 'Código en varios productos de Masterview'
+      : sameBarcode.length ? 'Código de barras en varios SKU de Masterview'
+      : exact ? null
+      : matchedBy === 'supplierSku' ? 'Clave de otro proveedor en Masterview'
+      : away.length ? 'Solo en Masterview de otra ciudad' : 'No está en Masterview';
 
     const q = quantity(row, cols, item);
     if (!q.ok) reasons.push(q.note ?? 'confirmar cantidad');
 
     let status: Proposal['status'];
-    if (row.mark === 'cross') { status = 'excluded'; reasons.unshift('tachado en la factura'); }
+    const ticked = marks.unmarked || marks.neutral.has(markKind(row) ?? '');
+    if (marks.allCrossed) { status = 'review'; reasons.unshift('todos los renglones vienen tachados: confirma qué llegó'); }
+    else if (row.mark === 'cross') { status = 'excluded'; reasons.unshift('tachado en la factura'); }
     else {
-      if (row.mark === 'none') reasons.push('sin palomita');
-      if (row.mark === 'other') reasons.push(`marca a mano: ${row.note ?? 'no clara'}`);
+      if (row.mark === 'none' && !ticked) reasons.push('sin palomita');
+      if (row.mark === 'other' && !ticked && !/^(corregido|marca) a mano/.test(q.note ?? '')) reasons.push(`marca a mano: ${row.note ?? 'no clara'}`);
       status = reasons.length ? 'review' : 'ok';
     }
-    return { row, item, matchedBy, candidates, quantity: q.q, quantityBasis: q.basis, status, reasons };
+    return { row, item, matchedBy, candidates, quantity: q.q, quantityBasis: q.basis, status, reasons, gap };
   });
   // Free sanity check: printed quantity totals vs the sum of each quantity column.
   const warnings: string[] = [];
@@ -255,7 +331,10 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
       continue;
     }
     const sums = cols.map((_, i) => rows.reduce((a, r) => a + (num(r.quantities?.[i]) ?? 0), 0));
-    const okHere = sums.some(x => Math.abs(x - v) < 1e-6);
+    // Two invoices in one upload each print their own total under the same label: together they must equal the rows.
+    const sameLabel = (t.printedTotals ?? []).filter(x => x.label.trim().toUpperCase() === t0.label.trim().toUpperCase());
+    const together = sameLabel.length > 1 ? sameLabel.reduce((a, x) => a + (num(x.value) ?? 0), 0) : v;
+    const okHere = sums.some(x => Math.abs(x - v) < 1e-6 || Math.abs(x - together) < 1e-6);
     // Some invoices total a different unit than any column (e.g. TotalPiezas on a cajas-only table): only
     // count a mismatch when the label names a unit we can compare.
     const comparable = sums.length > 0 && (/PIEZ|PZA|CAJ|CANT|UNID/i.test(t0.label));

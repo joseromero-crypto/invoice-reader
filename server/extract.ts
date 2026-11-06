@@ -15,6 +15,9 @@ export function readFailure(error:string|null){
  if(/^HTTP (429|5\d\d)\b/.test(error??''))return 'El servicio de lectura está saturado. Reintenta en unos minutos o captura directo en Retool.';
  return `No se pudo leer la factura: ${error??'sin respuesta'}`.slice(0,300);
 }
+// A database error is no use to a receiver, and the photo was fine: say what to do.
+export const SERVER_BUSY='El servidor está ocupado y no terminó la lectura. Reintenta en un momento o captura directo en Retool.';
+export const workerFailure=(e:unknown)=>!(e instanceof HttpError)?'No se pudo leer la factura. Reintenta o agrega los renglones a mano.':/statement timeout|upstream request timeout/i.test(e.message)?SERVER_BUSY:e.message;
 const isImage=(b:Buffer)=>(b[0]===0xff&&b[1]===0xd8)||(b[0]===0x89&&b[1]===0x50&&b[2]===0x4e&&b[3]===0x47);
 // Lean reader: photos → one transcription call (lean/transcribe.ts) → deterministic catalog match (lean/match.ts).
 export async function extractJob(request:Request,jobId:string){
@@ -39,9 +42,11 @@ export async function extractJob(request:Request,jobId:string){
   if(createHash('sha256').update(buffer).digest('hex')!==page.content_hash)throw new HttpError(400,'La foto no coincide con la registrada.');
   images.push(await prepareImage(buffer));
  }
+ // The catalog loads while the model reads, so it adds no wait; a failure is reported once the read is saved.
+ const loading=hubCity(db,receiving.hub_id).then(async city=>({city,rawProducts:await catalog(db,city)}));loading.catch(()=>{});
  read=await transcribe(apiKey,model,images);
  const t=read.transcription;if(!t||!Array.isArray(t.rows))throw new HttpError(502,readFailure(read.error));
- const city=await hubCity(db,receiving.hub_id),rawProducts=await catalog(db,city),products=asProducts(rawProducts,city);
+ const {city,rawProducts}=await loading,products=asProducts(rawProducts,city);
  const result=match(t,cityItems(rawProducts,city),await leanMappings(db,orgId,rawProducts));
  const supplier=result.supplier??t.supplier,reference=t.documentRef,warnings=[...result.warnings];
  if(read.error)warnings.push(`Lectura incompleta (${read.error}). Revisa que estén todos los renglones.`);
@@ -50,5 +55,5 @@ export async function extractJob(request:Request,jobId:string){
  const raw={supplier,reference,date:isoDate(t.date),printedTotal:null,printedPageCount:null,warnings,matchedSupplier:result.supplier,totalsOk:result.totalsOk,transcription:t};
  check(await db.rpc('finish_extraction',{p_job:job.id,p_actor:userId,p_raw:raw,p_rows:leanRows(t,result,products),p_usage:{...read.usage,stopReason:read.stopReason,seconds:read.seconds},p_model:model,p_duration:Date.now()-started,p_cost:read.costUsd,p_token:claimed.claim_token}));
  check(await db.from('extraction_jobs').update({prompt_version:'lean-v2'}).eq('org_id',orgId).eq('id',job.id));
- }catch(e){await fail(e instanceof HttpError?e.message:'No se pudo leer la factura. Reintenta o agrega los renglones a mano.');throw e;}
+ }catch(e){await fail(workerFailure(e));throw e;}
 }

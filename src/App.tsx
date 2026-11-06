@@ -9,11 +9,11 @@ import {demoHistory,loadDemo,saveDemo} from './lib/demoHistory';
 import ReviewList,{rowStatus,type Confirmation} from './Review';
 import CatalogUpload from './CatalogUpload';
 import Masterview from './Masterview';
+import {download} from './lib/download';
 import type {CatalogState} from './lib/localCatalog';
 import {catalogExample} from '../shared/catalog';
 import {isPdf,pdfPages} from './lib/pdfPages';
 const clone=<T,>(value:T):T=>structuredClone(value);
-function download(text:string,name:string){const url=URL.createObjectURL(new Blob([text],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 const scanDate=(date:string)=>new Date(date).toLocaleString('es-MX',{dateStyle:'medium',timeStyle:'short'});
 export default function App(){
  const [hub,setHub]=useState<Hub|null>(null),[hubs,setHubs]=useState<Hub[]>(DEMO_HUBS),[workspace,setWorkspace]=useState<Workspace|null>(null);

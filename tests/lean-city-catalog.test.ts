@@ -33,14 +33,15 @@ it('merges the hub catalog with the other cities and lists the hub city first',(
  expect(products.map(p=>[p.id,p.name,p.otherCity])).toEqual([['p','Jitomate saladet',undefined],['z','Agua local','Saltillo']]);
  expect(products[0].aliases).toEqual(['Tomate huaje']);
 });
-it('reads the hub city with the catalog RPC and the others by page, skipping retired products',async()=>{
+it('reads every city by page, skipping retired products',async()=>{
  const ranges:number[][]=[],rpc:any[]=[];
- const rows=[{sku:'AAA',city:'Monterrey',name:'Tomate huaje',barcode:null,proveedor:'LALA',sku_proveedor:'21541',unidad_compra:'Caja',piezas_por_unidad:12,mv_products:{id:'p',base_city:'Monterrey',calii_unit:'pz',barcode:'750111',retired:null}},
+ const rows=[{sku:'AAA',city:'CDMX',name:'Jitomate saladet',barcode:null,proveedor:null,sku_proveedor:null,unidad_compra:null,piezas_por_unidad:null,mv_products:{id:'p',base_city:'Monterrey',calii_unit:'pz',barcode:'750111',retired:null}},
+  {sku:'AAA',city:'Monterrey',name:'Tomate huaje',barcode:null,proveedor:'LALA',sku_proveedor:'21541',unidad_compra:'Caja',piezas_por_unidad:12,mv_products:{id:'p',base_city:'Monterrey',calii_unit:'pz',barcode:'750111',retired:null}},
   {sku:'OLD',city:'Monterrey',name:'Retirado',barcode:null,proveedor:null,sku_proveedor:null,unidad_compra:null,piezas_por_unidad:null,mv_products:{id:'o',base_city:'Monterrey',calii_unit:'pz',barcode:null,retired:'2026-11-01'}}];
- const db:any={rpc:async(name:string,args:any)=>{rpc.push([name,args]);return {data:name==='mv_city_status'?[{city:'Monterrey',rows:1500},{city:'CDMX',rows:9}]:[{id:'p',sku:'AAA',base_city:'Monterrey',barcode:'750111',raw:{},city_row:row('CDMX','Jitomate saladet')}],error:null};},
+ const db:any={rpc:async(name:string,args:any)=>{rpc.push([name,args]);return {data:[{city:'Monterrey',rows:1500},{city:'CDMX',rows:9}],error:null};},
   from:()=>{const chain:any={};for(const m of ['select','neq','order'])chain[m]=()=>chain;chain.range=async(a:number,b:number)=>{ranges.push([a,b]);return {data:a?[]:rows,error:null};};return chain;}};
  const products=await catalog(db,'CDMX');
- expect(rpc).toContainEqual(['read_mv_catalog',{p_city:'CDMX'}]);expect(ranges).toEqual([[0,999],[1000,1999]]);
+ expect(rpc.map(c=>c[0])).toEqual(['mv_city_status']);expect(ranges).toEqual([[0,999],[1000,1999]]);
  expect(products.map(p=>p.sku)).toEqual(['AAA']);
  expect(cityItems(products,'CDMX')[1]).toMatchObject({otherCity:'Monterrey',supplierSku:'21541',perPurchaseUnit:12,barcodes:['750111']});
 });

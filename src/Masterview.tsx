@@ -3,6 +3,7 @@ import {ArrowLeft,Check,LoaderCircle,RefreshCw,TriangleAlert,Upload,X} from 'luc
 import {CITY_PRIORITY,cityRank,parseMasterviewFile} from '../shared/catalog';
 import type {MvReport} from '../shared/masterview';
 import {api,supabase} from './lib/supabase';
+import UnmatchedReport from './UnmatchedReport';
 type CityStatus={city:string;rows:number;updated_at:string};
 type Job={id:string;state:'running'|'done'|'failed';error?:string};
 type Status={cities:CityStatus[];last:{id:string;uploaded_at:string;uploaded_by:string|null;report:MvReport&{files?:{city:string;rows:number}[]}}|null;job:Job|null};
@@ -66,5 +67,6 @@ export default function Masterview({onClose}:{onClose:()=>void}){
     {report.warnings.length>0&&<details className="catalog-warnings"><summary>{report.warnings.length} avisos</summary>{report.warnings.map((w,i)=><p key={i}>{w}</p>)}</details>}</>}
    </>}
   </div>
+ <UnmatchedReport/>
  </section>;
 }

@@ -8,17 +8,30 @@ function asProduct(p:any,city:string|null):Product{const row=city?p.city_rows.fi
 export function asProducts(rawProducts:any[],city:string|null):Product[]{const all=rawProducts.map(p=>asProduct(p,city));return [...all.filter(p=>!p.otherCity),...all.filter(p=>p.otherCity)];}
 export async function hubCity(db:SupabaseClient,hubId:string):Promise<string|null>{return check(await db.from('hubs').select('city').eq('id',hubId).maybeSingle())?.city??null;}
 const CITY_ROW='sku,city,name,barcode,proveedor,sku_proveedor,unidad_compra,piezas_por_unidad,mv_products!inner(id,base_city,calii_unit,barcode,retired:raw->>retired_at)',PAGE=1000;
-// Only the columns matching reads: read_mv_catalog for every city took 30 s, these pages take 2 s.
-async function otherCityRows(db:SupabaseClient,city:string){
- const cities:any[]=check(await db.rpc('mv_city_status'))??[],total=cities.filter(c=>c.city!==city).reduce((n,c)=>n+Number(c.rows),0);
- const pages=await Promise.all(Array.from({length:Math.ceil(total/PAGE)},async(_,i)=>check(await db.from('mv_product_city').select(CITY_ROW).neq('city',city).order('sku').order('city').range(i*PAGE,(i+1)*PAGE-1))??[]));
+// The shared project cuts API queries off after a few seconds, and it does so when the database is busy, not just when
+// a query is slow: three catalog reads at once (42 pages) all failed with a statement timeout. So pages go a few at a
+// time, and a read that was cut off is tried again.
+const PAGES_AT_ONCE=3,TRIES=3,cutOff=/statement timeout|upstream request timeout|fetch failed|timed out|ECONNRESET/i;
+export async function retried<T>(read:()=>Promise<T>,wait=(ms:number)=>new Promise(r=>setTimeout(r,ms))):Promise<T>{
+ for(let attempt=1;;attempt++)try{return await read();}catch(e:any){if(attempt>=TRIES||!cutOff.test(e?.message??''))throw e;await wait(1000*attempt);}
+}
+export async function inTurns<T>(count:number,read:(i:number)=>Promise<T>):Promise<T[]>{
+ const out:T[]=new Array(count);let next=0;
+ await Promise.all(Array.from({length:Math.min(PAGES_AT_ONCE,count)},async()=>{while(next<count){const i=next++;out[i]=await read(i);}}));
+ return out;
+}
+// Only the columns matching reads, in pages. read_mv_catalog builds the whole answer in one statement: 4.5 s alone, 19 s
+// with two at once, past its 60 s limit with three. All 19 pages take 2-8 s and hold up with readers side by side.
+async function cityRows(db:SupabaseClient,only?:string){
+ const cities:any[]=await retried(async()=>check(await db.rpc('mv_city_status'))??[]),total=cities.filter(c=>!only||c.city===only).reduce((n,c)=>n+Number(c.rows),0);
+ const page=(i:number)=>retried(async()=>{const q=db.from('mv_product_city').select(CITY_ROW);return check(await (only?q.eq('city',only):q).order('sku').order('city').range(i*PAGE,(i+1)*PAGE-1))??[];});
+ const pages=await inTurns(Math.ceil(total/PAGE),page);
  return (pages.flat() as any[]).filter(c=>!c.mv_products.retired).map(({mv_products:{retired,...product},...c})=>({product:{...product,sku:c.sku},row:{...c,raw:{Item:c.name,'Código de Barras':c.barcode,Proveedor:c.proveedor,'SKU Proveedor':c.sku_proveedor,'Unidad de compra':c.unidad_compra,'Peso neto o piezas (por unidad de compra)':c.piezas_por_unidad}}}));
 }
 // A hub with a city reads every city; a hub with no city reads MATCH_CITY's rows only.
 export async function catalog(db:SupabaseClient,city:string|null=null):Promise<any[]>{
- const read=async(c:string):Promise<any[]>=>check(await db.rpc('read_mv_catalog',{p_city:c}))??[];
- if(!city)return read(MATCH_CITY);
- const [own,others]=await Promise.all([read(city),otherCityRows(db,city)]);return withCityRows(own,others);
+ if(!city)return (await cityRows(db,MATCH_CITY)).map(({product,row})=>({raw:{},...product,city_row:row}));
+ return withCityRows([],await cityRows(db));
 }
 // The catalog read is several MB; polls send it again only when the catalog version changed.
 // Independent reads run in parallel (each is a round trip to Supabase).

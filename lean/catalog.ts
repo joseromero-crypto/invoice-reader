@@ -23,13 +23,13 @@ export function asCatalogItem(p: any, cityRow: any = p.city_row): CatalogItem {
     ...own, id: p.id, name: cityRow.name,
     supplier: own.supplier || base.supplier,
     supplierSku: own.supplierSku || base.supplierSku,
-    barcodes: own.barcodes.length ? own.barcodes : base.barcodes.length ? base.barcodes : p.barcode ? [p.barcode] : [],
+    barcodes: own.barcodes.length ? own.barcodes : base.barcodes.length ? base.barcodes : catalogItem({ 'Código de Barras': p.barcode }).barcodes,
     purchaseUnit: own.purchaseUnit || base.purchaseUnit,
     perPurchaseUnit: own.perPurchaseUnit ?? (sameUnit ? base.perPurchaseUnit : null),
     ...(aliases.length ? { aliases } : {}),
   };
 }
-// The hub's catalog (read_mv_catalog rows) plus the other cities' rows → one product per SKU with all its city rows.
+// Rows already read plus the rows of more cities → one product per SKU with all its city rows.
 export function withCityRows(own: any[], others: { product: any; row: any }[]): any[] {
   const bySku = new Map<string, any>(own.map(p => [p.sku, { ...p, city_rows: [p.city_row] }]));
   for (const { product, row } of others) {

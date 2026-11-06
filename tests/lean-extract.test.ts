@@ -10,7 +10,7 @@ const products=[
  {id:'u-topo',external_id:'topo',sku:'TOPO600',name:'Agua mineral Topo Chico 600ml',supplier:'Arca Continental',supplier_sku:'1152',barcode:null,unit:'pz',raw:{id:'topo',Item:'Agua mineral Topo Chico 600ml',sku:'TOPO600',Proveedor:'Arca Continental','SKU Proveedor':'1152','Unidad de compra':'Caja','Peso neto o piezas (por unidad de compra)':'12'}},
  {id:'u-coca',external_id:'coca',sku:'COCA25',name:'Refresco Coca Cola 2.5L',supplier:'Arca Continental',supplier_sku:'2574',barcode:null,unit:'pz',raw:{id:'coca',Item:'Refresco Coca Cola 2.5L',sku:'COCA25',Proveedor:'Arca Continental','SKU Proveedor':'2574','Unidad de compra':'Caja','Peso neto o piezas (por unidad de compra)':'8'}},
  {id:'u-fanta',external_id:'fanta',sku:'FANTA',name:'Refresco Fanta naranja 600ml',supplier:'Arca Continental',supplier_sku:'',barcode:null,unit:'pz',raw:{id:'fanta',Item:'Refresco Fanta naranja 600ml',sku:'FANTA',Proveedor:'Arca Continental','Unidad de compra':'Caja','Peso neto o piezas (por unidad de compra)':'24'}},
-].map(p=>({id:p.id,sku:p.sku,barcode:p.barcode,calii_unit:p.unit,raw:{},city_row:{name:p.name,barcode:null,raw:p.raw}}));
+].map(p=>({sku:p.sku,city:'Monterrey',name:p.name,barcode:null,proveedor:p.raw.Proveedor,sku_proveedor:p.raw['SKU Proveedor']??null,unidad_compra:p.raw['Unidad de compra'],piezas_por_unidad:p.raw['Peso neto o piezas (por unidad de compra)'],mv_products:{id:p.id,base_city:'Monterrey',calii_unit:p.unit,barcode:p.barcode,retired:null}}));
 const transcription={supplier:'ARCA CONTINENTAL SAB',documentRef:'F-77',date:'28/10/2026',quantityColumns:['CAJAS','PIEZAS'],printedTotals:[{label:'TOTAL PIEZAS',value:'84'}],rows:[
  {photo:1,codes:[{header:'DESCRIPCION',value:'1152'},{header:'CVEPROD',value:'50202310'}],description:'T CH AGUA MINERAL 600 ML',quantities:['5','60'],unit:null,mark:'check',note:null},
  {photo:1,codes:[{header:'DESCRIPCION',value:'2574'}],description:'COCA COLA 2.5L',quantities:['3','24'],unit:null,mark:'check',note:null},
@@ -21,14 +21,14 @@ function fakeDB({claim=true,mappings=[] as any[],job:jobOverride={} as any}={}){
  const job:any={id:'job',document_id:'doc',requested_by:'user',status:'queued',claim_token:'claim',...jobOverride};
  const db:any={calls,updates,storage:{from:()=>({download:async()=>({data:new Blob([new Uint8Array(photo)]),error:null})})},rpc:async(name:string,args:any)=>{calls.push([name,args]);
   if(name==='claim_extraction')return {data:claim?{...job,status:'processing'}:null,error:null};
-  if(name==='read_mv_catalog')return {data:products,error:null};
+  if(name==='mv_city_status')return {data:[{city:'Monterrey',rows:products.length}],error:null};
   return {data:null,error:null};},
  from:(table:string)=>{let mutation:any=null;const chain:any={};for(const m of ['select','eq','gt','neq','order','in','limit'])chain[m]=()=>chain;
   chain.update=(d:any)=>{mutation=d;updates.push([table,d]);return chain;};chain.insert=(d:any)=>{updates.push([table,d]);return chain;};
   const resolve=()=>{if(mutation)return {data:[{id:'x'}],error:null};
    const data=table==='extraction_jobs'?job:table==='documents'?(calls.some(c=>c[0]==='claim_extraction')?[]:{id:'doc',session_id:'session'}):table==='receiving_sessions'?{hub_id:'hub'}:table==='source_pages'?[{page_number:1,object_path:'org/doc/p.jpg',content_hash:createHash('sha256').update(photo).digest('hex')}]:table==='supplier_mappings'?mappings:table==='invoice_rows'?[]:null;
    return {data,error:null};};
-  chain.single=chain.maybeSingle=async()=>resolve();chain.then=(y:any,n:any)=>Promise.resolve(resolve()).then(y,n);return chain;}};
+  chain.range=async()=>({data:products,error:null});chain.single=chain.maybeSingle=async()=>resolve();chain.then=(y:any,n:any)=>Promise.resolve(resolve()).then(y,n);return chain;}};
  return db;
 }
 const fetchMock=vi.fn();
@@ -52,11 +52,11 @@ it('reads all photos in one call, downscales them, matches against the Mastervie
  expect(fanta.status).toBe('excluded');expect(fanta.reasons[0]).toBe('tachado en la factura');
  expect(state.db.calls.map((c:any)=>c[0])).not.toContain('reserve_document_call');
 });
-it('uses a saved supplier mapping for a code the catalog does not know',async()=>{
+it('fills in a saved mapping for a code the catalog does not know, for a person to verify',async()=>{
  const t={...transcription,printedTotals:[],rows:[{...transcription.rows[2],mark:'check',quantities:['1','24']}]};
  fetchMock.mockResolvedValue(new Response(JSON.stringify({stop_reason:'end_turn',usage:{input_tokens:1,output_tokens:1},content:[{type:'text',text:JSON.stringify(t)}]})));
  state.db=fakeDB({mappings:[{supplier:'Arca Continental',supplier_sku:'9999',mv_product_id:'u-fanta'}]});await extractJob(new Request('http://local'),'job');
- const row=state.db.calls.find((c:any)=>c[0]==='finish_extraction')[1].p_rows[0];expect(row).toMatchObject({status:'ok',product:{id:'u-fanta'},proposedQuantity:24});
+ const row=state.db.calls.find((c:any)=>c[0]==='finish_extraction')[1].p_rows[0];expect(row).toMatchObject({status:'review',product:{id:'u-fanta'},proposedQuantity:24});
 });
 it('does nothing when the job is already claimed, and records a failed read with its cost',async()=>{
  state.db=fakeDB({claim:false});await extractJob(new Request('http://local'),'job');expect(fetchMock).not.toHaveBeenCalled();

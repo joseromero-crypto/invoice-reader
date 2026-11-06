@@ -42,7 +42,7 @@ export function confirmRow(row:Row,product:Product,quantity:number,identityCheck
  return {...row,product,proposalEvidence:row.proposalEvidence??row.evidence,evidence:['Identidad y cantidad verificadas por receptor',...(product.id===row.product?.id&&Object.keys(corrections).length===0?row.evidence:[])],corrections:CorrectionsSchema.parse(corrections),actualQuantity:quantity,confirmedQuantity:quantity,confirmed:true,resolvedFlags:[...row.resolvedFlags,...row.flags],flags:[]};
 }
 const headers=['item_name','pieces','calii_sku','supplier_sku','barcode','evidence','calii_product_id','document_ref','source_row'];
-function csvCell(value:unknown){let s=String(value??'');if(/^[\s]*[=+@-]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';}
+export function csvCell(value:unknown){let s=String(value??'');if(/^[\s]*[=+@-]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';}
 export const needsSourceReview=(d:Document)=>d.rows.some(r=>['basic-v1','basic-v2'].includes(String(r.sourceDetails?.readingMode)));
 export function exportCsv(documents:Document[],partial=false,sourceReviewed=false){
  if(documents.some(needsSourceReview)&&!sourceReviewed)throw Error('Revisa las fotos originales y la lista completa antes de exportar.');
