@@ -180,11 +180,15 @@ function markKind(row: TranscribedRow): string | null {
 // A mark repeated down the page says the row was looked at, not that something is wrong with it, so it counts as a
 // tick: any mark on every row that isn't crossed out, a dash or highlighter on at least half of them (Cumbres ticks
 // LALA with dashes). A page with no marks at all has nothing to compare, so it isn't a reason to stop on every row.
+// A page with no ticks and only a stray note or two (Arca DNL 5694665657: one circled "PNS OC" among 22 rows) is still
+// an unticked page: the noted rows stop on their own note, the others don't stop for "sin palomita".
 function pageMarks(rows: TranscribedRow[]): { neutral: Set<string>; unmarked: boolean; allCrossed: boolean } {
   const open = rows.filter(r => r.mark !== 'cross'), kinds = new Map<string, number>();
   for (const r of open) { const k = markKind(r); if (k) kinds.set(k, (kinds.get(k) ?? 0) + 1); }
   const neutral = [...kinds].filter(([k, n]) => n >= 2 && (n === open.length || (['dash', 'highlight'].includes(k) && n * 2 >= open.length))).map(([k]) => k);
-  return { neutral: new Set(neutral), unmarked: open.length >= 2 && open.every(r => r.mark === 'none'), allCrossed: rows.length >= 2 && !open.length };
+  const marked = open.filter(r => r.mark !== 'none');
+  const unmarked = open.length >= 2 && !marked.some(r => r.mark === 'check') && marked.length * 4 <= open.length;
+  return { neutral: new Set(neutral), unmarked, allCrossed: rows.length >= 2 && !open.length };
 }
 
 // ---------- main ----------
@@ -316,7 +320,7 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
     else if (row.mark === 'cross') { status = 'excluded'; reasons.unshift('tachado en la factura'); }
     else {
       if (row.mark === 'none' && !ticked) reasons.push('sin palomita');
-      if (row.mark === 'other' && !ticked && !/^(corregido|marca) a mano/.test(q.note ?? '')) reasons.push(`marca a mano: ${row.note ?? 'no clara'}`);
+      if (row.mark === 'other' && !marks.neutral.has(markKind(row) ?? '') && !/^(corregido|marca) a mano/.test(q.note ?? '')) reasons.push(`marca a mano: ${row.note ?? 'no clara'}`);
       status = reasons.length ? 'review' : 'ok';
     }
     return { row, item, matchedBy, candidates, quantity: q.q, quantityBasis: q.basis, status, reasons, gap };

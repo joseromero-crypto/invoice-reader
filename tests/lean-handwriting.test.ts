@@ -72,6 +72,15 @@ describe('marks repeated down the page', () => {
     expect(statuses(doc([row({ mark: 'none' }), row({ mark: 'none' })]))).toEqual(['ok', 'ok']);
   });
 
+  it('one note on an otherwise unticked page stops only that row (Arca DNL 5694665657)', () => {
+    const rows = [...Array(7)].map(() => row({ mark: 'none' }));
+    expect(statuses(doc([...rows, yellow('handwritten circle/mark at left and note "PNS OC"')]))).toEqual([...rows.map(() => 'ok'), 'review']);
+  });
+
+  it('many different notes and no ticks is not an unticked page', () => {
+    expect(statuses(doc([row({ mark: 'none' }), row({ mark: 'none' }), yellow('circled'), yellow('star')]))).toEqual(['review', 'review', 'review', 'review']);
+  });
+
   it('crossed rows plus unmarked rows: the unmarked ones arrived', () => {
     expect(statuses(doc([row({ mark: 'none' }), row({ mark: 'none' }), row({ mark: 'cross' })]))).toEqual(['ok', 'ok', 'excluded']);
   });
