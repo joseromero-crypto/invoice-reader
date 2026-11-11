@@ -1,6 +1,6 @@
 import {it,expect} from 'vitest';
 import {MV_CITY_COLUMNS,MV_PRODUCT_COLUMNS,canonicalCity,parseMasterviewFile} from '../shared/catalog';
-import {barcodeKeys,buildLatest,planImport,type MvState} from '../shared/masterview';
+import {barcodeKeys,buildLatest,importPayload,planImport,type MvState} from '../shared/masterview';
 import {asCatalogItem} from '../lean/catalog';
 const header='id,sku,Item,city,Código de Barras,Image URL,Full Res. Image URL,Proveedor,SKU Proveedor,Unidad de compra,Peso neto o piezas (por unidad de compra),Deshabilitar compras,Calii Unit,Calii Sale Price';
 const row=(id:number,sku:string,item:string,city:string,barcode='',image=`https://img/${sku}`)=>`${id},${sku},${item},${city},${barcode},${image},,Prov,,,,,pz,99`;
@@ -101,6 +101,13 @@ it('counts added, updated and unchanged against what is stored',()=>{
  const state=after(empty,planImport([mty()],empty));
  const r=planImport([file([row(1,'TOM','Tomate huaje ahorramás','Monterrey','00750111'),row(2,'QSO','Queso fresco','Monterrey','750222'),row(3,'NEW','Nuevo','Monterrey')])],state).report!;
  expect(r).toMatchObject({added:1,updated:1,unchanged:1});
+});
+it('reads Tiers as trimmed text, and null when the cell is empty or the column is missing',()=>{
+ const csv=(rows:string[])=>parseMasterviewFile(['id,sku,Item,city,Código de Barras,Image URL,Proveedor,Tiers',...rows].join('\n'),'Monterrey.csv');
+ expect(csv(['1,A,Uno,Monterrey,,https://i/a,P, 4 ','2,B,Dos,Monterrey,,https://i/b,P,N','3,C,Tres,Monterrey,,https://i/c,P,0','4,D,Cuatro,Monterrey,,https://i/d,P,']).rows.map(r=>r.tiers)).toEqual(['4','N','0',null]);
+ expect(parseMasterviewFile('id,sku,Item,city,Código de Barras,Image URL,Proveedor\n1,A,Uno,Monterrey,,https://i/a,P','Monterrey.csv').rows[0].tiers).toBeNull();
+ const plan=planImport([csv(['1,A,Uno,Monterrey,,https://i/a,P,7'])],{version:null,products:[],cities:[]});
+ expect(importPayload(plan).p_rows[0]).toMatchObject({sku:'A',tiers:'7'});
 });
 it('keeps only the whitelist, and match() still gets every column it reads',()=>{
  const f=file(['7,SKU1,Item uno,Monterrey,-,https://img/x,https://big/x,LALA,21541,Caja,"12",true,pz,99']);

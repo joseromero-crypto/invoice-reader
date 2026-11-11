@@ -34,7 +34,7 @@ const fold=(s:string)=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().
 export const canonicalCity=(city:string)=>CITY_PRIORITY.find(c=>fold(c)===fold(city))??city.trim();
 export const cityRank=(city:string)=>{const i=CITY_PRIORITY.indexOf(city);return i<0?CITY_PRIORITY.length:i;};
 export const citySlug=(city:string)=>fold(city).replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-export type MvRow={sku:string;retoolId:string;name:string;barcode:string|null;proveedor:string|null;skuProveedor:string|null;unidadCompra:string|null;piezasPorUnidad:number|null;deshabilitarCompras:boolean|null;productRaw:Record<string,string>;cityRaw:Record<string,string>};
+export type MvRow={sku:string;retoolId:string;name:string;barcode:string|null;proveedor:string|null;skuProveedor:string|null;unidadCompra:string|null;piezasPorUnidad:number|null;deshabilitarCompras:boolean|null;tiers:string|null;productRaw:Record<string,string>;cityRaw:Record<string,string>};
 export type MvFile={fileName:string;city:string|null;rows:MvRow[];errors:string[];warnings:string[]};
 const mvValue=(v:unknown)=>{const s=String(v??'').trim();return s==='-'||s==="'-"?'':s;};
 const mvPick=(row:Record<string,string>,columns:readonly string[])=>Object.fromEntries(columns.map(c=>[c,mvValue(row[c])]).filter(([,v])=>v));
@@ -59,8 +59,9 @@ export function parseMasterviewFile(csv:string,fileName=''):MvFile{
   if(!sku)problems.push(`fila ${index+2} sin sku`);else if(seen.has(sku))problems.push(`SKU duplicado ${sku}`);
   if(!retoolId||!name.trim())problems.push(`fila ${index+2} sin id o Item`);
   seen.add(sku);
+  // Tiers is kept as printed (1–8, 0, C, F, N…) for inventario-conf, which interprets it. A file without the column gives null.
   const n=parseFloat(mvValue(r['Peso neto o piezas (por unidad de compra)']).replace(',','.')),off=mvValue(r['Deshabilitar compras']).toLowerCase();
-  return {sku,retoolId,name,barcode:mvValue(r['Código de Barras'])||null,proveedor:mvValue(r.Proveedor)||null,skuProveedor:mvValue(r['SKU Proveedor'])||null,unidadCompra:mvValue(r['Unidad de compra'])||null,piezasPorUnidad:Number.isFinite(n)?n:null,deshabilitarCompras:off==='true'?true:off==='false'?false:null,productRaw:mvPick(r,MV_PRODUCT_COLUMNS),cityRaw:mvPick(r,MV_CITY_COLUMNS)};
+  return {sku,retoolId,name,barcode:mvValue(r['Código de Barras'])||null,proveedor:mvValue(r.Proveedor)||null,skuProveedor:mvValue(r['SKU Proveedor'])||null,unidadCompra:mvValue(r['Unidad de compra'])||null,piezasPorUnidad:Number.isFinite(n)?n:null,deshabilitarCompras:off==='true'?true:off==='false'?false:null,tiers:r.Tiers?.trim()||null,productRaw:mvPick(r,MV_PRODUCT_COLUMNS),cityRaw:mvPick(r,MV_CITY_COLUMNS)};
  });
  if(problems.length)errors.push(`${label}: ${problems.slice(0,5).join(', ')}${problems.length>5?` y ${problems.length-5} más`:''}.`);
  if(city&&!CITY_PRIORITY.includes(city))warnings.push(`Ciudad desconocida: ${city}. Se importa tal cual y va después de las ciudades conocidas.`);

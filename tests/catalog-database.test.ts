@@ -116,3 +116,18 @@ it('reports what does not map and refuses to retire products until it is resolve
  expect(await confirmed(null)).toBe('Tomate huaje');
  expect(await confirmed('Saltillo')).toBe('Tomate huaje');
 });
+it('saves each city file\'s Tiers as text, overwrites it on re-upload, and leaves it null without the column',async()=>{
+ // inventario-conf owns the column on armado-ch; this stands in for its migration.
+ await db.exec(`alter table mv_product_city add column tiers text;`);
+ await db.exec(fs.readFileSync('supabase/migrations/20261111120000_import_mv_tiers.sql','utf8'));
+ const withTiers=(city:string,tiers:string[],rows:string[])=>parseMasterviewFile([`${header},Tiers`,...rows.map((r,i)=>`${r},${tiers[i]}`)].join('\n'),`${city}.csv`);
+ const mty=(t:string[])=>withTiers('Monterrey',t,['101,AAA,Tomate huaje,Monterrey,750111,https://img/a,LALA,21541,Caja,12,pz','102,BBB,Queso,Monterrey,750222,https://img/b,Sigma,,,,pz']);
+ const tiers=async()=>Object.fromEntries((await db.query<any>(`select sku||'/'||city k,tiers from mv_product_city order by 1`)).rows.map(r=>[r.k,r.tiers]));
+ await write(admin,[mty([' 3 ','C']),withTiers('CDMX',['0',''],['901,AAA,Jitomate saladet,CDMX,750111,https://img/a,Otro,5,Caja,6,pz','902,CCC,Aceite local,CDMX,,https://img/c,Local,,,,pz'])],'tiers-1');
+ expect(await tiers()).toEqual({'AAA/CDMX':'0','AAA/Monterrey':'3','BBB/Monterrey':'C','CCC/CDMX':null});
+ await write(admin,[mty(['8',''])],'tiers-2');
+ expect(await tiers()).toEqual({'AAA/CDMX':'0','AAA/Monterrey':'8','BBB/Monterrey':null,'CCC/CDMX':null});
+ await write(admin,[monterrey()],'tiers-3');
+ expect((await tiers())['AAA/Monterrey']).toBeNull();
+ expect((await db.query<any>(`select raw from mv_product_city where sku='AAA' and city='Monterrey'`)).rows[0].raw.Tiers).toBeUndefined();
+});

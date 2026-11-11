@@ -61,7 +61,7 @@ export function planImport(files:MvFile[],state:MvState,options:{confirmDrop?:bo
  return {errors,drops,warnings,cities:[...uploaded],products,rows:files.flatMap(f=>f.rows.map(row=>({city:f.city!,row}))),report};
 }
 // Arguments for the import_mv RPC. The city barcode is stored only when it differs from the product's; the RPC recomputes that.
-export const importPayload=(plan:ReturnType<typeof planImport>)=>({p_cities:plan.cities,p_products:plan.products.map(({id:_,...p})=>p),p_rows:plan.rows.map(({city,row})=>({sku:row.sku,city,retool_id:row.retoolId,name:row.name,proveedor:row.proveedor,sku_proveedor:row.skuProveedor,unidad_compra:row.unidadCompra,piezas_por_unidad:row.piezasPorUnidad,deshabilitar_compras:row.deshabilitarCompras,raw:row.cityRaw}))});
+export const importPayload=(plan:ReturnType<typeof planImport>)=>({p_cities:plan.cities,p_products:plan.products.map(({id:_,...p})=>p),p_rows:plan.rows.map(({city,row})=>({sku:row.sku,city,retool_id:row.retoolId,name:row.name,proveedor:row.proveedor,sku_proveedor:row.skuProveedor,unidad_compra:row.unidadCompra,piezas_por_unidad:row.piezasPorUnidad,deshabilitar_compras:row.deshabilitarCompras,tiers:row.tiers,raw:row.cityRaw}))});
 // masterview/latest.json for the static apps: barcode entries are objects, name entries plain strings (what Sorting Hub reads today).
 export function buildLatest(state:MvState,hubs:{name:string;city:string|null;active:boolean}[]){
  const products=new Map(state.products.filter(p=>!p.raw.retired_at).map(p=>[p.sku,p]));
