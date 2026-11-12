@@ -3,11 +3,11 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 import {check} from './auth';
 import {asCatalogItem,cityItems,MATCH_CITY,withCityRows} from '../lean/catalog.ts';
 export {cityItems};
-function asProduct(p:any,city:string|null):Product{const row=city?p.city_rows.find((c:any)=>c.city===city)??p.city_rows[0]:p.city_row,c=asCatalogItem(p,row);return {id:p.id,sku:p.sku,name:c.name,nameColumn:'Item',supplier:c.supplier,supplierSku:c.supplierSku||null,barcode:row.barcode??p.barcode??null,unit:p.calii_unit||'desconocida',purchaseUnit:c.purchaseUnit,perPurchaseUnit:c.perPurchaseUnit,...(c.aliases?{aliases:c.aliases}:{}),...(city&&row.city!==city?{otherCity:row.city}:{})};}
+function asProduct(p:any,city:string|null):Product{const row=city?p.city_rows.find((c:any)=>c.city===city)??p.city_rows[0]:p.city_row,c=asCatalogItem(p,row);return {id:p.id,sku:p.sku,name:c.name,nameColumn:'Item',supplier:c.supplier,supplierSku:c.supplierSku||null,barcode:row.barcode??p.barcode??null,unit:p.calii_unit||'desconocida',purchaseUnit:c.purchaseUnit,perPurchaseUnit:c.perPurchaseUnit,...(c.aliases?{aliases:c.aliases}:{}),...(c.purchasingOff?{purchasingOff:true}:{}),...(city&&row.city!==city?{otherCity:row.city}:{})};}
 // The hub's city first, products from other cities after: the picker shows them in this order.
 export function asProducts(rawProducts:any[],city:string|null):Product[]{const all=rawProducts.map(p=>asProduct(p,city));return [...all.filter(p=>!p.otherCity),...all.filter(p=>p.otherCity)];}
 export async function hubCity(db:SupabaseClient,hubId:string):Promise<string|null>{return check(await db.from('hubs').select('city').eq('id',hubId).maybeSingle())?.city??null;}
-const CITY_ROW='sku,city,name,barcode,proveedor,sku_proveedor,unidad_compra,piezas_por_unidad,mv_products!inner(id,base_city,calii_unit,barcode,retired:raw->>retired_at)',PAGE=1000;
+const CITY_ROW='sku,city,name,barcode,proveedor,sku_proveedor,unidad_compra,piezas_por_unidad,deshabilitar_compras,mv_products!inner(id,base_city,calii_unit,barcode,retired:raw->>retired_at)',PAGE=1000;
 // The shared project cuts API queries off after a few seconds, and it does so when the database is busy, not just when
 // a query is slow: three catalog reads at once (42 pages) all failed with a statement timeout. So pages go a few at a
 // time, and a read that was cut off is tried again.
@@ -26,7 +26,7 @@ async function cityRows(db:SupabaseClient,only?:string){
  const cities:any[]=await retried(async()=>check(await db.rpc('mv_city_status'))??[]),total=cities.filter(c=>!only||c.city===only).reduce((n,c)=>n+Number(c.rows),0);
  const page=(i:number)=>retried(async()=>{const q=db.from('mv_product_city').select(CITY_ROW);return check(await (only?q.eq('city',only):q).order('sku').order('city').range(i*PAGE,(i+1)*PAGE-1))??[];});
  const pages=await inTurns(Math.ceil(total/PAGE),page);
- return (pages.flat() as any[]).filter(c=>!c.mv_products.retired).map(({mv_products:{retired,...product},...c})=>({product:{...product,sku:c.sku},row:{...c,raw:{Item:c.name,'Código de Barras':c.barcode,Proveedor:c.proveedor,'SKU Proveedor':c.sku_proveedor,'Unidad de compra':c.unidad_compra,'Peso neto o piezas (por unidad de compra)':c.piezas_por_unidad}}}));
+ return (pages.flat() as any[]).filter(c=>!c.mv_products.retired).map(({mv_products:{retired,...product},...c})=>({product:{...product,sku:c.sku},row:{...c,raw:{Item:c.name,'Código de Barras':c.barcode,Proveedor:c.proveedor,'SKU Proveedor':c.sku_proveedor,'Unidad de compra':c.unidad_compra,'Peso neto o piezas (por unidad de compra)':c.piezas_por_unidad,'Deshabilitar compras':c.deshabilitar_compras?'true':''}}}));
 }
 // A hub with a city reads every city; a hub with no city reads MATCH_CITY's rows only.
 export async function catalog(db:SupabaseClient,city:string|null=null):Promise<any[]>{

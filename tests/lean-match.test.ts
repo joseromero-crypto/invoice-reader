@@ -57,6 +57,29 @@ describe('lean match', () => {
     expect(r.proposals[0].status).toBe('review');
   });
 
+  it("suggests the invoice supplier's own products first, and disabled products last", () => {
+    const alp = (o: Partial<CatalogItem>) => item({ supplier: 'Alpura', purchaseUnit: 'Pieza', perPurchaseUnit: 1, ...o });
+    const cat = [
+      alp({ id: 'leche', name: 'Leche entera Alpura 1L', supplierSku: 'LEUP420' }),
+      alp({ id: 'leche2', name: 'Leche light Alpura 1L', supplierSku: 'LEUP421' }),
+      alp({ id: 'yog', name: 'Yoghurt bebible de fresa Alpura 220ml', supplierSku: 'YOBP001' }),
+      alp({ id: 'v200', name: 'Leche deslactosada chocolate Alpura Vaquitas 200ml', supplierSku: 'LESA825', purchasingOff: true }),
+      alp({ id: 'v180', name: 'Leche deslactosada chocolate Alpura Vaquitas 180ml', supplierSku: 'SA80' }),
+      item({ id: 'lala', name: 'Yoghurt bebible fresa LALA 220g', supplier: 'LALA', supplierSku: '027784' }),
+    ];
+    const known = (code: string) => row({ codes: [{ header: 'CODIGO', value: code }], quantities: ['1'], unit: 'PZ' });
+    const r = match(doc(['CANT.'], [known('LEUP420'), known('LEUP421'),
+      row({ codes: [{ header: 'CODIGO', value: 'YOBP060' }], description: 'YOGHURT BEB FRESA PAST 220G CED', quantities: ['1'], unit: 'PZ' }),
+      row({ codes: [{ header: 'CODIGO', value: 'PTELS00029' }], description: 'LECHE DESLACTOSADA CHOCOLATE VAQUITAS', quantities: ['1'], unit: 'PZ' }),
+    ]), cat);
+    expect(r.supplier).toBe('Alpura');
+    expect(r.proposals[2].candidates[0].id).toBe('yog');
+    expect(r.proposals[2].candidates.map(c => c.id)).toContain('lala');
+    expect(r.proposals[3].candidates.map(c => c.id).slice(0, 2)).toEqual(['v180', 'v200']);
+    expect(r.proposals[3].candidates[1].purchasingOff).toBe(true);
+    expect(r.proposals[3].item).toBeNull();
+  });
+
   it('treats an unlabeled column as pieces when it adds up to a printed pieces total (Bimbo)', () => {
     const bimbo = [item({ id: 'pan', name: 'Pan blanco Bimbo 620g', supplier: 'Bimbo', barcodes: ['7500810029183'], perPurchaseUnit: 5 }), item({ id: 'arte', name: 'Pan artesano Bimbo 567g', supplier: 'Bimbo', barcodes: ['7501030452553'], perPurchaseUnit: 5 })];
     const rows = [row({ codes: [{ header: 'COD BARRAS', value: '7500810029183' }], quantities: ['30'] }), row({ codes: [{ header: 'COD BARRAS', value: '7501030452553' }], quantities: ['25'] })];

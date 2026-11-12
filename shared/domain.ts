@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {PrintedReadingSchema} from './printed-reading.ts';
 import {BasicReadingSchema} from './basic-reading.ts';
-export const ProductSchema = z.object({id:z.string(),sku:z.string(),name:z.string(),nameColumn:z.string().optional(),supplier:z.string(),supplierSku:z.string().nullable(),barcode:z.string().nullable(),unit:z.string(),purchaseUnit:z.string().optional(),perPurchaseUnit:z.number().nullable().optional(),aliases:z.array(z.string()).optional(),otherCity:z.string().optional(),raw:z.record(z.string(),z.unknown()).optional()});
+export const ProductSchema = z.object({id:z.string(),sku:z.string(),name:z.string(),nameColumn:z.string().optional(),supplier:z.string(),supplierSku:z.string().nullable(),barcode:z.string().nullable(),unit:z.string(),purchaseUnit:z.string().optional(),perPurchaseUnit:z.number().nullable().optional(),aliases:z.array(z.string()).optional(),otherCity:z.string().optional(),purchasingOff:z.boolean().optional(),raw:z.record(z.string(),z.unknown()).optional()});
 export type Product = z.infer<typeof ProductSchema>;
 export type Candidate = {product:Product; evidence:string[]; flags:string[]; score:number};
 export const CorrectionsSchema=z.object({description:z.string().max(1000).optional(),supplierSku:z.string().max(100).nullable().optional(),barcode:z.string().max(100).nullable().optional()}).strict();

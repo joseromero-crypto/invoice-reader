@@ -115,5 +115,5 @@ it('keeps only the whitelist, and match() still gets every column it reads',()=>
  expect(Object.keys(r.productRaw).every(k=>(MV_PRODUCT_COLUMNS as readonly string[]).includes(k))).toBe(true);
  expect(Object.keys(r.cityRaw).every(k=>(MV_CITY_COLUMNS as readonly string[]).includes(k))).toBe(true);
  expect(JSON.stringify({...r.productRaw,...r.cityRaw})).not.toContain('99');
- expect(asCatalogItem({id:'uuid',sku:r.sku,raw:r.productRaw,city_row:{name:r.name,raw:r.cityRaw}})).toEqual({id:'uuid',name:'Item uno',sku:'SKU1',supplier:'LALA',supplierSku:'21541',barcodes:[],purchaseUnit:'Caja',perPurchaseUnit:12});
+ expect(asCatalogItem({id:'uuid',sku:r.sku,raw:r.productRaw,city_row:{name:r.name,raw:r.cityRaw}})).toEqual({id:'uuid',name:'Item uno',sku:'SKU1',supplier:'LALA',supplierSku:'21541',barcodes:[],purchaseUnit:'Caja',perPurchaseUnit:12,purchasingOff:true});
 });

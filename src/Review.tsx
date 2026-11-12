@@ -12,11 +12,11 @@ const transcribed=(r:Row)=>Array.isArray(r.sourceDetails?.codes)?r.sourceDetails
 // Same rules as lean/match.ts: a different product can change cajas × piezas por caja.
 function piecesFor(r:Row,product:Product|null){const t=transcribed(r);if(!t||!r.columns)return null;return quantity(t,r.columns,product&&toItem(product)).q;}
 const fold=(s:string)=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-const City=({p}:{p:Product})=>p.otherCity?<span className="c-tag c-tag--ink lean-city">Otra ciudad ({p.otherCity})</span>:null;
+const City=({p}:{p:Product})=><>{p.otherCity&&<span className="c-tag c-tag--ink lean-city">Otra ciudad ({p.otherCity})</span>}{p.purchasingOff&&<span className="c-tag c-tag--ink lean-city">Compras deshabilitadas</span>}</>;
 function ProductPicker({value,candidates,products,disabled,onChange,big=false}:{value:Product|null;candidates:Product[];products:Product[];disabled:boolean;onChange:(p:Product)=>void;big?:boolean}){
  const [open,setOpen]=useState(false),[query,setQuery]=useState('');
  const q=fold(query.trim()),words=q.split(/\s+/);
- const found=q?products.filter(p=>{const hay=fold(`${p.name} ${p.aliases?.join(' ')??''} ${p.sku} ${p.supplierSku??''} ${p.barcode??''}`);return words.every(w=>hay.includes(w));}).slice(0,12):[];
+ const found=q?products.filter(p=>{const hay=fold(`${p.name} ${p.aliases?.join(' ')??''} ${p.sku} ${p.supplierSku??''} ${p.barcode??''}`);return words.every(w=>hay.includes(w));}).sort((a,b)=>Number(!!a.purchasingOff)-Number(!!b.purchasingOff)).slice(0,12):[];
  const pick=(p:Product)=>{onChange(p);setOpen(false);setQuery('');};
  return <div className="lean-picker"><button type="button" className={`lean-picked${big?' big':''}${value?'':' unset'}`} disabled={disabled} onClick={()=>setOpen(!open)} aria-label={value?`Cambiar ${value.name}`:'Elegir producto'}><span><strong>{value?.name??'Elegir producto'}</strong>{value&&<City p={value}/>}</span><ChevronDown size={big?14:15}/></button>
  {open&&<div className="lean-picker-menu"><label className="search wide"><Search size={14}/><input autoFocus placeholder="Buscar en el catálogo…" value={query} onChange={e=>setQuery(e.target.value)}/></label>

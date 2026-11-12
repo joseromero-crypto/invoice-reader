@@ -19,9 +19,10 @@ export interface CatalogItem {
   perPurchaseUnit: number | null; // Peso neto o piezas (por unidad de compra)
   aliases?: string[];    // the Item text in other cities, for description candidates
   otherCity?: string;    // this entry is that city's row, not the hub's: a candidate, never auto-selected
+  purchasingOff?: boolean; // "Deshabilitar compras" in this city: still matchable by code, last among suggestions
 }
 
-export interface Candidate { id: string; name: string; sku: string; score: number; otherCity?: string }
+export interface Candidate { id: string; name: string; sku: string; score: number; otherCity?: string; purchasingOff?: boolean }
 
 export interface Proposal {
   row: TranscribedRow;
@@ -58,6 +59,7 @@ export function catalogItem(r: Record<string, unknown>): CatalogItem {
     barcodes: clean(r['Código de Barras']).split(/[,;/\s]+/).filter(Boolean),
     purchaseUnit: clean(r['Unidad de compra']),
     perPurchaseUnit: Number.isFinite(n) && n > 0 ? n : null,
+    ...(/^(true|s[ií]|1)$/i.test(clean(r['Deshabilitar compras'])) ? { purchasingOff: true } : {}),
   };
 }
 
@@ -249,7 +251,7 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
   const localIds = new Set(local.map(c => c.id));
   const exclusive = [...new Map(catalog.filter(c => !localIds.has(c.id)).reverse().map(c => [c.id, c])).values()];
   const allTokens = supplier || exclusive.length ? [...local, ...exclusive].map(withTokens) : poolTokens;
-  const candidate = (c: CatalogItem, score: number): Candidate => ({ id: c.id, name: c.name, sku: c.sku, score, ...(c.otherCity ? { otherCity: c.otherCity } : {}) });
+  const candidate = (c: CatalogItem, score: number): Candidate => ({ id: c.id, name: c.name, sku: c.sku, score, ...(c.otherCity ? { otherCity: c.otherCity } : {}), ...(c.purchasingOff ? { purchasingOff: true } : {}) });
   const distinct = (items: CatalogItem[]) => items.filter((c, k, a) => a.findIndex(x => x.id === c.id) === k);
 
   const proposals = rows.map((row, i): Proposal => {
@@ -294,10 +296,16 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
     ])].filter(c => c.otherCity));
     for (const c of away) reasons.push(`Otra ciudad (${c.otherCity}): el código coincide con ${c.name}`);
 
+    // A product with purchasing switched off in this city is rarely what arrived (Alpura "SABORIZADA 180 ML" was picked
+    // as the disabled 200 ml Vaquitas), so it sorts as if it scored 0.3 less.
+    const sortKey = (c: Candidate) => c.score - (c.purchasingOff ? 0.3 : 0);
     const rank = (list: (readonly [CatalogItem, Set<string>[]])[]) => list.map(([it, names]) => candidate(it, Math.max(...names.map(tk => similarity(desc, tk)))))
-      .filter(c => c.score > 0.25).sort((a, b) => b.score - a.score).slice(0, 3);
-    let candidates = item ? [] : rank(poolTokens);
-    if (!item && (candidates[0]?.score ?? 0) < 0.5) candidates = [...candidates, ...rank(allTokens)].sort((a, b) => b.score - a.score).filter((c, k, a) => a.findIndex(x => x.id === c.id) === k).slice(0, 3);
+      .filter(c => c.score > 0.25).sort((a, b) => sortKey(b) - sortKey(a)).slice(0, 3);
+    // The invoice supplier's own products come first; a weak own match keeps its top two places and the best other
+    // suppliers' products fill in (Alpura "YOGHURT BEB FRESA PAST 220G" scored LALA 220g above Alpura 220ml).
+    const own = item ? [] : rank(poolTokens);
+    let candidates = own;
+    if (!item && (own[0]?.score ?? 0) < 0.5) candidates = [...own.slice(0, 2), ...rank(allTokens).filter(c => !own.some(o => o.id === c.id))].slice(0, 3);
     for (const c of bcHits.length > 1 ? bcHits : skuHits.length > 1 ? skuHits : []) candidates.unshift(candidate(c, 1));
     const disputed = mapped && mapped.id !== item?.id ? [mapped] : [];
     candidates = [...away, ...sameBarcode, ...disputed].map(c => candidate(c, 1)).concat(candidates).filter((c, k, a) => a.findIndex(x => x.id === c.id) === k);
