@@ -13,6 +13,7 @@ export async function leanMappings(db:SupabaseClient,orgId:string,rawProducts:an
 // catalog and mappings. Rows edited/confirmed by a receiver are preserved.
 export async function rematchDocument(db:SupabaseClient,orgId:string,userId:string,document:any){
  const job=check(await db.from('extraction_jobs').select('status,raw_result').eq('org_id',orgId).eq('document_id',document.id).single())!;
+ if(document.purpose==='recepcion')throw new HttpError(409,'Las lecturas de recepción son de solo lectura.');
  if(job.status!=='complete')throw new HttpError(409,'La lectura todavía no está completa.');
  const t=job.raw_result?.transcription as Transcription|undefined;if(!t)throw new HttpError(409,'Esta factura se leyó con el lector anterior; no se puede actualizar.');
  const session=check(await db.from('receiving_sessions').select('hub_id').eq('org_id',orgId).eq('id',document.session_id).single())!;

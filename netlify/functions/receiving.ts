@@ -9,7 +9,8 @@ import {mappingKeys} from '../../lean/match.ts';
 const uuid=z.string().uuid();
 const Input=z.discriminatedUnion('action',[
  z.object({action:z.literal('hubs')}),z.object({action:z.literal('history'),hubId:uuid,before:z.object({at:z.string().datetime({offset:true}),id:uuid}).optional()}),z.object({action:z.literal('create'),hubId:uuid}),z.object({action:z.literal('latest'),hubId:uuid}),z.object({action:z.literal('load'),sessionId:uuid,catalogVersion:uuid.nullable().optional()}),
- z.object({action:z.literal('document'),sessionId:uuid}),
+ z.object({action:z.literal('document'),sessionId:uuid,purpose:z.enum(['captura','recepcion']).default('captura')}),
+ z.object({action:z.literal('job-status'),sessionId:uuid,documentId:uuid}),
  z.object({action:z.literal('rematch'),sessionId:uuid,documentId:uuid}),
  z.object({action:z.literal('metadata'),sessionId:uuid,documentId:uuid,supplier:z.string().trim().min(1).max(200),invoiceDate:z.string().date().nullable(),revision:z.number().int().nonnegative()}),
  z.object({action:z.literal('confirm-batch'),sessionId:uuid,documentId:uuid,rows:z.array(z.object({rowId:uuid,productId:uuid,quantity:z.number().int().nonnegative().max(1000000),revision:z.number().int().nonnegative()})).min(1).max(500)}),
@@ -26,10 +27,10 @@ export default async function handler(request:Request){
  if(b.action==='hubs')return Response.json({hubs:await listHubs(db,orgId,userId,role),role});
  if(b.action==='history'){
  await requireHub(db,orgId,userId,b.hubId);
- let query=db.from('documents').select('id,session_id,supplier,reference,created_at,invoice_date,receiving_sessions!inner(hub_id,status)').eq('org_id',orgId).eq('receiving_sessions.hub_id',b.hubId).order('created_at',{ascending:false}).order('id',{ascending:false}).limit(51);
+ let query=db.from('documents').select('id,session_id,supplier,reference,created_at,invoice_date,purpose,receiving_sessions!inner(hub_id,status)').eq('org_id',orgId).eq('receiving_sessions.hub_id',b.hubId).order('created_at',{ascending:false}).order('id',{ascending:false}).limit(51);
  if(b.before)query=query.or(`created_at.lt.${b.before.at},and(created_at.eq.${b.before.at},id.lt.${b.before.id})`);
  const docs=check(await query)!;const visible=docs.slice(0,50);const last=visible.at(-1);
- return Response.json({entries:visible.map((d:any)=>({id:d.id,sessionId:d.session_id,hubId:b.hubId,supplier:d.supplier??'Proveedor por identificar',reference:d.reference??'Sin referencia',scannedAt:d.created_at,invoiceDate:d.invoice_date,status:d.receiving_sessions.status})),next:docs.length>50&&last?{at:last.created_at,id:last.id}:null});
+ return Response.json({entries:visible.map((d:any)=>({id:d.id,sessionId:d.session_id,hubId:b.hubId,supplier:d.supplier??'Proveedor por identificar',reference:d.reference??'Sin referencia',scannedAt:d.created_at,invoiceDate:d.invoice_date,status:d.receiving_sessions.status,purpose:d.purpose??'captura'})),next:docs.length>50&&last?{at:last.created_at,id:last.id}:null});
  }
  if(b.action==='create'){await requireHub(db,orgId,userId,b.hubId);const session=check(await db.from('receiving_sessions').insert({org_id:orgId,hub_id:b.hubId,created_by:userId}).select('id').single())!;return Response.json({sessionId:session.id,orgId});}
  if(b.action==='latest'){await requireHub(db,orgId,userId,b.hubId);const latest=check(await db.from('receiving_sessions').select('id').eq('org_id',orgId).eq('hub_id',b.hubId).order('created_at',{ascending:false}).limit(1).maybeSingle());return Response.json({sessionId:latest?.id??null});}
@@ -37,9 +38,17 @@ export default async function handler(request:Request){
  await requireHub(db,orgId,userId,session.hub_id);
  if(b.action==='load')return Response.json({workspace:await loadWorkspace(db,orgId,b.sessionId,b.catalogVersion)});
  if(b.action==='snapshot'){const id=check(await db.rpc('snapshot_receipt',{p_actor:userId,p_org:orgId,p_session:b.sessionId,p_partial:b.partial}))!;return Response.json({snapshotId:id});}
+ if(b.action==='job-status'){
+ const job=check(await db.from('extraction_jobs').select('status,error,lease_until,created_at,documents!inner(session_id)').eq('org_id',orgId).eq('document_id',b.documentId).eq('documents.session_id',b.sessionId).maybeSingle());
+ // Same staleness rules as load: a lease that ran out or a dispatch that never started is a failed read.
+ const stale=(job?.status==='processing'&&!!job.lease_until&&new Date(job.lease_until)<new Date())||(job?.status==='queued'&&new Date(job.created_at).getTime()<Date.now()-120000);
+ return Response.json({status:stale?'failed':job?.status??null,error:stale?'La lectura no terminó.':job?.error??null});
+ }
  if(session.status!=='open')throw new HttpError(409,'Receipt is already saved');
- if(b.action==='document'){const document=check(await db.from('documents').insert({org_id:orgId,session_id:b.sessionId}).select('id').single())!;return Response.json({documentId:document.id});}
+ if(b.action==='document'){const document=check(await db.from('documents').insert({org_id:orgId,session_id:b.sessionId,purpose:b.purpose}).select('id').single())!;return Response.json({documentId:document.id});}
  const document=check(await db.from('documents').select('*').eq('org_id',orgId).eq('session_id',b.sessionId).eq('id',b.documentId).maybeSingle());if(!document)throw new HttpError(404,'Document not found');
+ // Nobody confirms a reception read here: it is kept as read, for mh-recibo.
+ if(document.purpose==='recepcion'&&['metadata','confirm-batch','confirm','add-row'].includes(b.action))throw new HttpError(409,'Las lecturas de recepción son de solo lectura.');
  if(b.action==='rematch')return Response.json(await rematchDocument(db,orgId,userId,document));
  if(b.action==='metadata'){check(await db.rpc('update_scan_metadata',{p_actor:userId,p_org:orgId,p_document:b.documentId,p_supplier:b.supplier,p_invoice_date:b.invoiceDate,p_expected_revision:b.revision}));return Response.json({ok:true});}
  if(b.action==='confirm-batch'){

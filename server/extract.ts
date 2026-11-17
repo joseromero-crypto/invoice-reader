@@ -3,6 +3,7 @@ import {transcribe,type ImageInput,type ReadResult} from '../lean/transcribe.ts'
 import {prepareImage} from '../lean/image.ts';
 import {match} from '../lean/match.ts';
 import {leanRows,isoDate} from './lean-rows.ts';
+import {receptionRecord} from '../lean/reception.ts';
 import {asProducts,catalog,cityItems,hubCity} from './workspace';
 import {leanMappings} from './rematch';
 import {requireHub} from './hubs';
@@ -47,12 +48,15 @@ export async function extractJob(request:Request,jobId:string){
  read=await transcribe(apiKey,model,images);
  const t=read.transcription;if(!t||!Array.isArray(t.rows))throw new HttpError(502,readFailure(read.error));
  const {city,rawProducts}=await loading,products=asProducts(rawProducts,city);
- const result=match(t,cityItems(rawProducts,city),await leanMappings(db,orgId,rawProducts));
+ // Reception reads (documents.purpose) use printed numbers only and give a product only when sure of it; mh-recibo reads raw.reception.
+ const purpose=document.purpose==='recepcion'?'recepcion':'captura';
+ const result=match(t,cityItems(rawProducts,city),await leanMappings(db,orgId,rawProducts),{mode:purpose});
  const supplier=result.supplier??t.supplier,reference=t.documentRef,warnings=[...result.warnings];
  if(read.error)warnings.push(`Lectura incompleta (${read.error}). Revisa que estén todos los renglones.`);
- if(reference&&supplier){const duplicates=check(await db.from('documents').select('id,receiving_sessions!inner(hub_id)').eq('org_id',orgId).eq('receiving_sessions.hub_id',receiving.hub_id).eq('supplier',supplier).eq('reference',reference).neq('id',document.id))!;if(duplicates.length)warnings.push('Posible factura duplicada: proveedor y referencia ya registrados en este hub.');}
+ // A reception read of the same invoice isn't a captured one: duplicates are only looked for among captura reads.
+ if(reference&&supplier&&purpose==='captura'){const duplicates=check(await db.from('documents').select('id,receiving_sessions!inner(hub_id)').eq('org_id',orgId).eq('receiving_sessions.hub_id',receiving.hub_id).eq('purpose','captura').eq('supplier',supplier).eq('reference',reference).neq('id',document.id))!;if(duplicates.length)warnings.push('Posible factura duplicada: proveedor y referencia ya registrados en este hub.');}
  // finish_extraction copies supplier/reference/date/warnings from p_raw onto the document.
- const raw={supplier,reference,date:isoDate(t.date),printedTotal:null,printedPageCount:null,warnings,matchedSupplier:result.supplier,totalsOk:result.totalsOk,transcription:t};
+ const raw={supplier,reference,date:isoDate(t.date),printedTotal:null,printedPageCount:null,warnings,matchedSupplier:result.supplier,totalsOk:result.totalsOk,transcription:t,purpose,...(purpose==='recepcion'?{reception:receptionRecord(t,result)}:{})};
  check(await db.rpc('finish_extraction',{p_job:job.id,p_actor:userId,p_raw:raw,p_rows:leanRows(t,result,products),p_usage:{...read.usage,stopReason:read.stopReason,seconds:read.seconds},p_model:model,p_duration:Date.now()-started,p_cost:read.costUsd,p_token:claimed.claim_token}));
  check(await db.from('extraction_jobs').update({prompt_version:'lean-v2'}).eq('org_id',orgId).eq('id',job.id));
  }catch(e){await fail(workerFailure(e));throw e;}

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { match, type CatalogItem } from '../lean/match.ts';
 import type { Transcription, TranscribedRow } from '../lean/transcribe.ts';
+import { receptionRecord, RECEPTION_CONTRACT } from '../lean/reception.ts';
 
 const item = (o: Partial<CatalogItem>): CatalogItem => ({ id: '1', name: 'x', sku: 'S', supplier: 'Arca Continental', supplierSku: '', barcodes: [], purchaseUnit: 'Caja', perPurchaseUnit: 12, ...o });
 const row = (o: Partial<TranscribedRow>): TranscribedRow => ({ photo: 1, codes: [], description: '', quantities: [], unit: null, mark: 'check', note: null, ...o });
@@ -174,6 +175,88 @@ describe('lean match', () => {
       expect(r.supplier).toBe('Bebidas Norte');
       expect(r.proposals[0].item).toBeNull();
       expect(r.proposals[0].status).toBe('review');
+    });
+  });
+
+  describe('reception mode', () => {
+    const recepcion = { mode: 'recepcion' } as const;
+    const topo = { header: 'CLAVE', value: '1152' };
+
+    it('uses the printed quantity and only notes handwriting', () => {
+      const t = doc(['PIEZAS'], [
+        row({ codes: [topo], quantities: ['12'], handQuantities: ['8'], mark: 'check' }),
+        row({ codes: [topo], quantities: ['24'], handDelta: '-2', mark: 'none' }),
+      ]);
+      const captura = match(t, catalog).proposals;
+      expect(captura.map(p => p.quantity)).toEqual([8, 22]);
+      const r = match(t, catalog, new Map(), recepcion).proposals;
+      expect(r.map(p => p.quantity)).toEqual([12, 24]);
+      expect(r.every(p => p.confident && p.quantityOk && p.status === 'ok')).toBe(true);
+      expect(r.every(p => p.reasons.includes('marca a mano en hoja de recepción'))).toBe(true);
+    });
+
+    it('ignores page marks: an unticked row among ticks is not a reason', () => {
+      const t = doc(['PIEZAS'], [row({ codes: [topo], quantities: ['12'] }), row({ codes: [topo], quantities: ['12'] }), row({ codes: [topo], quantities: ['12'], mark: 'none' })]);
+      expect(match(t, catalog).proposals[2].reasons).toContain('sin palomita');
+      const p = match(t, catalog, new Map(), recepcion).proposals[2];
+      expect(p).toMatchObject({ status: 'ok', reasons: [], confident: true });
+    });
+
+    it('keeps a crossed-out row, read as printed, with a note', () => {
+      const t = doc(['PIEZAS'], [row({ codes: [topo], quantities: ['12'], mark: 'cross' }), row({ codes: [topo], quantities: ['6'], mark: 'none' })]);
+      expect(match(t, catalog).proposals[0].status).toBe('excluded');
+      const p = match(t, catalog, new Map(), recepcion).proposals[0];
+      expect(p.status).not.toBe('excluded');
+      expect(p).toMatchObject({ quantity: 12, confident: true, item: { id: 'topo' } });
+      expect(p.reasons[0]).toMatch(/tachado.*como impreso/);
+    });
+
+    it('a saved mapping is a candidate, not the product', () => {
+      const t = { ...doc(['CANT.'], [row({ codes: [{ header: 'CLAVE', value: 'YOBT910' }], description: 'YOGHURT BAT FRESA 900G', quantities: ['2'], unit: 'CAJAS' })]), supplier: 'ALPURA' };
+      const saved = new Map([['ALPURA|YOBT910', 'topo']]);
+      const captura = match(t, catalog, saved).proposals[0];
+      expect(captura).toMatchObject({ matchedBy: 'mapping', quantity: 24, confident: false });
+      const p = match(t, catalog, saved, recepcion).proposals[0];
+      expect(p).toMatchObject({ item: null, matchedBy: null, confident: false, quantity: null, quantityOk: false, status: 'review' });
+      expect(p.candidates[0]).toMatchObject({ id: 'topo', score: 1 });
+    });
+
+    it("another supplier's code and description matches are not confident", () => {
+      const cat = [...catalog, item({ id: 'mora', name: 'Yoghurt batido mora Alpura 900g', supplier: 'Alpura', supplierSku: '7001' }), item({ id: 'fresa', name: 'Yoghurt batido fresa Alpura 900g', supplier: 'Alpura', supplierSku: '7002', purchaseUnit: 'Pieza', perPurchaseUnit: 1 })];
+      const t = doc(['PIEZAS'], [
+        row({ codes: [topo], quantities: ['12'] }), row({ codes: [topo], quantities: ['12'] }),
+        row({ codes: [{ header: 'CLAVE', value: '7002' }], description: 'YOGHURT BATIDO FRESA 900G', quantities: ['4'] }),
+        row({ codes: [{ header: 'CLAVE', value: 'ZZ9' }], description: 'YOGHURT BATIDO MORA 900G', quantities: ['3'] }),
+      ]);
+      const [, , other, desc] = match(t, cat, new Map(), recepcion).proposals;
+      expect(match(t, cat).supplier).toBe('Arca Continental');
+      expect(other).toMatchObject({ item: null, confident: false, quantity: 4 });
+      expect(other.candidates[0].id).toBe('fresa');
+      expect(desc).toMatchObject({ item: null, confident: false, quantity: 3 });
+      expect(desc.candidates[0].id).toBe('mora');
+    });
+
+    it('leaves captura exactly as it was', () => {
+      const t = doc(['CAJAS', 'PIEZAS'], [row({ codes: [topo], quantities: ['5', '60'], mark: 'cross' }), row({ codes: [topo], quantities: ['1', '12'], handQuantities: [null, '10'] })]);
+      expect(match(t, catalog)).toEqual(match(t, catalog, new Map(), { mode: 'captura' }));
+    });
+
+    it('builds the record mh-recibo reads', () => {
+      const t = doc(['CAJAS', 'PIEZAS'], [
+        row({ codes: [topo, { header: 'CVEPROD', value: '50202310' }], description: 'AGUA MINERAL 600ML', quantities: ['5', '60'], mark: 'none' }),
+        row({ codes: [{ header: 'CLAVE', value: 'ZZZ' }], description: 'TOPO CHICO AGUA MINERAL 600ML', quantities: ['1', null], unit: 'CAJAS', mark: 'none' }),
+      ]);
+      const rec = receptionRecord(t, match(t, catalog, new Map(), recepcion));
+      expect(rec.contract).toBe(RECEPTION_CONTRACT);
+      expect(rec.rows[0]).toEqual({
+        sourceRow: 1, sku: 'S', productName: 'Agua mineral Topo Chico 600ml', matchedBy: 'supplierSku', confident: true, piezas: 60, quantityOk: true,
+        printedCodes: [topo, { header: 'CVEPROD', value: '50202310' }], printedDescription: 'AGUA MINERAL 600ML',
+        printedQuantities: [{ header: 'CAJAS', value: '5' }, { header: 'PIEZAS', value: '60' }], printedUnit: null, candidates: [], notes: [],
+      });
+      expect(rec.rows[1]).toMatchObject({ sourceRow: 2, sku: null, productName: null, matchedBy: null, confident: false, piezas: null, quantityOk: false });
+      expect(rec.rows[1].candidates[0]).toEqual({ sku: 'S', name: 'Agua mineral Topo Chico 600ml', score: expect.any(Number) });
+      expect(rec.rows[1].notes.length).toBeGreaterThan(0);
+      expect(JSON.parse(JSON.stringify(rec))).toEqual(rec);
     });
   });
 });

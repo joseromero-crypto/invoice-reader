@@ -3,6 +3,7 @@
 //   node --experimental-strip-types scripts/lean-bench.ts --model claude-sonnet-5-5 --run sonnet-v1
 //   node --experimental-strip-types scripts/lean-bench.ts --run sonnet-v1 --replay     (free: rematch saved reads)
 //   ... --replay --masterview "private/catalog/mv_monterrey_2026-11-03.csv"           (free: same, through the importer's parsing and whitelist)
+//   ... --replay --mode recepcion        (free: reception matching; writes NN-match-recepcion.json and REPORT-recepcion.md)
 //   ... --replay --masterview <monterrey.csv,saltillo.csv,cdmx.csv,guadalajara.csv> [--city Saltillo]   (free: as a hub in that city, default Monterrey)
 //
 // Paid reads go to private/lean-bench/<run>/NN-read.json. Total spend across ALL runs is tracked in
@@ -27,6 +28,8 @@ const model = arg('model', process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5')!;
 const budget = parseFloat(arg('budget', '3')!);
 const only = arg('invoices')?.split(',').map(Number);
 const concurrency = parseInt(arg('concurrency', '4')!);
+const mode = arg('mode', 'captura') as 'captura' | 'recepcion';
+const suffix = mode === 'recepcion' ? '-recepcion' : '';
 mkdirSync(join(OUT, run), { recursive: true });
 
 // ---------- inputs ----------
@@ -86,9 +89,9 @@ async function one(inv: typeof invoices[number]) {
     spend.totalUsd += read.costUsd; spend.calls.push({ run, invoice: inv.n, model, usd: read.costUsd, usage: read.usage, at: new Date().toISOString() }); saveSpend();
     writeFileSync(file, JSON.stringify(read, null, 2));
   }
-  const m = read.transcription ? match(read.transcription, catalog) : { supplier: null, proposals: [], totalsOk: null, warnings: ['lectura fallida'] };
+  const m = read.transcription ? match(read.transcription, catalog, new Map(), { mode }) : { supplier: null, proposals: [], totalsOk: null, warnings: ['lectura fallida'] };
   const s = score(inv.n, m.proposals);
-  writeFileSync(join(OUT, run, `${String(inv.n).padStart(2, '0')}-match.json`), JSON.stringify({ supplier: m.supplier, totalsOk: m.totalsOk, warnings: m.warnings, proposals: m.proposals, score: s }, null, 2));
+  writeFileSync(join(OUT, run, `${String(inv.n).padStart(2, '0')}-match${suffix}.json`), JSON.stringify({ supplier: m.supplier, totalsOk: m.totalsOk, warnings: m.warnings, proposals: m.proposals, score: s }, null, 2));
   return { inv, read, m, s };
 }
 
@@ -109,5 +112,21 @@ for (const { inv, read, m, s } of results) {
 lines.push(`| **Total** | | | ${tot.exp} | ${tot.id} | ${tot.qty} | ${tot.both} | ${tot.ok} | ${tot.okWrong} | ${tot.usd.toFixed(4)} | ${tot.sec.toFixed(0)} | |`, '', `Cumulative spend across all lean runs: $${spend.totalUsd.toFixed(4)} (budget $${budget}).`, '', '## Misses', '');
 for (const { inv, s } of results) for (const r of s.rows) if (!r.idOk || !r.qtyOk)
   lines.push(`- #${inv.n} row ${r.row}: expected ${r.expectedName} ×${r.expectedQty} | got ${r.gotName ?? '—'} ×${r.gotQty ?? '—'} [${r.status}; ${r.basis}; ${r.reasons.join('; ')}]`);
-writeFileSync(join(OUT, run, 'REPORT.md'), lines.join('\n'));
-console.log(lines.slice(0, 20 + results.length).join('\n'));
+if (mode === 'recepcion') {
+  // Reception reads are never confirmed in this app: what counts is how many rows mh-recibo can use as they are.
+  const r = { rows: 0, sure: 0, sureWrong: 0, skuOnly: 0, none: 0, noneQty: 0 };
+  const per = ['', '## Reception (sku given only when confident)', '', '| # | Rows | Confident SKU + qty | of those wrong vs key | Confident SKU, qty unsure | SKU null | SKU null but piezas read |', '|---|---|---|---|---|---|---|'];
+  for (const { inv, m, s } of results) {
+    const ps: Proposal[] = m.proposals, sure = ps.filter(p => p.confident && p.quantityOk), skuOnly = ps.filter(p => p.confident && !p.quantityOk), none = ps.filter(p => !p.confident);
+    const wrong = s.rows.filter((x: any) => x.gotId && !(x.idOk && x.qtyOk) && sure.some(p => p.item?.id === x.gotId)).length;
+    r.rows += ps.length; r.sure += sure.length; r.sureWrong += wrong; r.skuOnly += skuOnly.length; r.none += none.length; r.noneQty += none.filter(p => p.quantityOk).length;
+    per.push(`| ${inv.n} | ${ps.length} | ${sure.length} | ${wrong} | ${skuOnly.length} | ${none.length} | ${none.filter(p => p.quantityOk).length} |`);
+  }
+  per.push(`| **Total** | ${r.rows} | ${r.sure} | ${r.sureWrong} | ${r.skuOnly} | ${r.none} | ${r.noneQty} |`);
+  lines.splice(lines.indexOf('## Misses'), 0, ...per, '');
+  lines.length = lines.indexOf('## Misses') + 1;
+  for (const { inv, s } of results) for (const x of s.rows) if (x.gotId && !(x.idOk && x.qtyOk))
+    lines.push(`- #${inv.n} row ${x.row}: expected ${x.expectedName} ×${x.expectedQty} | got ${x.gotName} ×${x.gotQty ?? '—'} [${x.basis}; ${x.reasons.join('; ')}]`);
+}
+writeFileSync(join(OUT, run, `REPORT${suffix}.md`), lines.join('\n'));
+console.log(lines.slice(0, mode === 'recepcion' ? undefined : 20 + results.length).join('\n'));

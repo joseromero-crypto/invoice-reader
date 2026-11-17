@@ -33,6 +33,8 @@ export interface Proposal {
   quantityBasis: string;
   status: 'ok' | 'review' | 'excluded';
   reasons: string[];
+  confident: boolean;    // product from an exact Masterview code (barcode, or this supplier's SKU) with nothing disputing it
+  quantityOk: boolean;   // quantity resolved by the rules, nothing to check
   gap: string | null;    // why Masterview couldn't answer this row by itself; null = exact match. For the report to commercial.
 }
 
@@ -42,6 +44,12 @@ export interface MatchResult {
   totalsOk: boolean | null;   // null = invoice prints no quantity total
   warnings: string[];         // document-level, shown above the list; a failed total blocks bulk confirm
 }
+
+// captura (default): the receiver's sheet, handwriting rules over printing, a person confirms every row.
+// recepcion: the clean invoice scanned on arrival and never confirmed here (mh-recibo reads it). Printed numbers only,
+// marks ignored, nothing excluded, and a product is given only when `confident`; otherwise item is null and the
+// tentative product leads the candidates.
+export interface MatchOptions { mode?: 'captura' | 'recepcion' }
 
 // Confirmed supplier code → Calii id mappings learned from past receipts (key: `${supplier}|${code}`).
 export type Mappings = Map<string, string>;
@@ -136,9 +144,9 @@ function handwritten(row: TranscribedRow, printed: (number | null)[]): { vals: (
   return { vals: printed.map((v, i) => i === known[0] ? before + delta : v), note: `corregido a mano: impreso ${before}, marca ${row.handDelta}` };
 }
 
-export function quantity(row: TranscribedRow, cols: string[], item: CatalogItem | null): { q: number | null; basis: string; ok: boolean; note?: string } {
+export function quantity(row: TranscribedRow, cols: string[], item: CatalogItem | null, ignoreHand = false): { q: number | null; basis: string; ok: boolean; note?: string } {
   const printed = cols.map((_, i) => num(row.quantities?.[i]));
-  const hand = handwritten(row, printed);
+  const hand = ignoreHand ? null : handwritten(row, printed);
   const q = fromColumns(row, cols, hand?.vals ?? printed, item);
   // A hand-corrected quantity is always read by a person, whatever the conversion says.
   return hand ? { ...q, ok: false, note: q.note ? `${hand.note}; ${q.note}` : hand.note } : q;
@@ -194,7 +202,8 @@ function pageMarks(rows: TranscribedRow[]): { neutral: Set<string>; unmarked: bo
 }
 
 // ---------- main ----------
-export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappings = new Map()): MatchResult {
+export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappings = new Map(), opts: MatchOptions = {}): MatchResult {
+  const reception = opts.mode === 'recepcion';
   // The hub's city comes first; entries with otherCity are only looked at when the hub's own rows explain nothing.
   const local = catalog.filter(c => !c.otherCity);
   const index = (items: CatalogItem[]) => {
@@ -295,6 +304,12 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
       ...keys.flatMap(k => everywhere.sku.get(k) ?? []).filter(it => similarity(desc, tokens(it.name)) >= 0.3),
     ])].filter(c => c.otherCity));
     for (const c of away) reasons.push(`Otra ciudad (${c.otherCity}): el código coincide con ${c.name}`);
+    const exact = matchedBy === 'barcode' || (matchedBy === 'supplierSku' && ownSku), found = matchedBy;
+    // Every reason so far is about identity: an exact code with none of them is a product we are sure of.
+    const confident = exact && !reasons.length;
+    // Reception: a product we aren't sure of is only a suggestion (fresa vs mora: only codes tell them apart).
+    const held = reception && item && !confident ? [item] : [];
+    if (held.length) { item = null; matchedBy = null; }
 
     // A product with purchasing switched off in this city is rarely what arrived (Alpura "SABORIZADA 180 ML" was picked
     // as the disabled 200 ml Vaquitas), so it sorts as if it scored 0.3 less.
@@ -308,21 +323,28 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
     if (!item && (own[0]?.score ?? 0) < 0.5) candidates = [...own.slice(0, 2), ...rank(allTokens).filter(c => !own.some(o => o.id === c.id))].slice(0, 3);
     for (const c of bcHits.length > 1 ? bcHits : skuHits.length > 1 ? skuHits : []) candidates.unshift(candidate(c, 1));
     const disputed = mapped && mapped.id !== item?.id ? [mapped] : [];
-    candidates = [...away, ...sameBarcode, ...disputed].map(c => candidate(c, 1)).concat(candidates).filter((c, k, a) => a.findIndex(x => x.id === c.id) === k);
-    if (!item && !away.length) reasons.push(candidates.length ? 'elegir producto (sin código coincidente)' : 'producto no encontrado en catálogo');
+    candidates = [...held, ...away, ...sameBarcode, ...disputed].map(c => candidate(c, 1)).concat(candidates).filter((c, k, a) => a.findIndex(x => x.id === c.id) === k);
+    if (!item && !away.length && !held.length) reasons.push(candidates.length ? 'elegir producto (sin código coincidente)' : 'producto no encontrado en catálogo');
 
-    const exact = matchedBy === 'barcode' || (matchedBy === 'supplierSku' && ownSku);
     const gap = !barcodes.length && !keys.length ? 'Sin código en la factura'
       : bcHits.length > 1 || skuHits.length > 1 ? 'Código en varios productos de Masterview'
       : sameBarcode.length ? 'Código de barras en varios SKU de Masterview'
       : exact ? null
-      : matchedBy === 'supplierSku' ? 'Clave de otro proveedor en Masterview'
+      : found === 'supplierSku' ? 'Clave de otro proveedor en Masterview'
       : away.length ? 'Solo en Masterview de otra ciudad' : 'No está en Masterview';
 
-    const q = quantity(row, cols, item);
+    const q = quantity(row, cols, item, reception);
     if (!q.ok) reasons.push(q.note ?? 'confirmar cantidad');
 
     let status: Proposal['status'];
+    const quantityOk = q.ok && q.q != null;
+    if (reception) {
+      // The reception sheet should be clean: handwriting is noted, never used, and a crossed row still counts as printed.
+      const hand = row.handQuantities?.some(v => num(v) != null) || num(row.handDelta) != null;
+      if (row.mark === 'cross') reasons.unshift('renglón tachado en hoja de recepción: se leyó como impreso');
+      else if (row.mark !== 'none' || hand || clean(row.note)) reasons.push('marca a mano en hoja de recepción');
+      return { row, item, matchedBy, candidates, quantity: q.q, quantityBasis: q.basis, status: confident && quantityOk ? 'ok' : 'review', reasons, gap, confident, quantityOk };
+    }
     const ticked = marks.unmarked || marks.neutral.has(markKind(row) ?? '');
     if (marks.allCrossed) { status = 'review'; reasons.unshift('todos los renglones vienen tachados: confirma qué llegó'); }
     else if (row.mark === 'cross') { status = 'excluded'; reasons.unshift('tachado en la factura'); }
@@ -331,7 +353,7 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
       if (row.mark === 'other' && !marks.neutral.has(markKind(row) ?? '') && !/^(corregido|marca) a mano/.test(q.note ?? '')) reasons.push(`marca a mano: ${row.note ?? 'no clara'}`);
       status = reasons.length ? 'review' : 'ok';
     }
-    return { row, item, matchedBy, candidates, quantity: q.q, quantityBasis: q.basis, status, reasons, gap };
+    return { row, item, matchedBy, candidates, quantity: q.q, quantityBasis: q.basis, status, reasons, gap, confident, quantityOk };
   });
   // Free sanity check: printed quantity totals vs the sum of each quantity column.
   const warnings: string[] = [];
