@@ -21,6 +21,7 @@ async function project(){
  await db.exec(read('supabase/shared-project/setup.sql'));
  await db.exec(read('supabase/migrations/20261105120000_masterview_shared.sql'));
  await db.exec(read('supabase/migrations/20261117120000_reception_reads.sql'));
+ await db.exec(read('supabase/migrations/20261118120000_reception_external_ref.sql'));
  return db;
 }
 const t:Transcription={supplier:'COMERCIALIZADORA DE LACTEOS',documentRef:'CWB-1',date:'17/11/2026',quantityColumns:['PIEZAS'],printedTotals:[],rows:[
@@ -68,11 +69,14 @@ it('returns reception reads only, newest first, with the record rows and RLS app
  expect(done.rows[1]).toMatchObject({sourceRow:2,sku:null,matchedBy:null,confident:false,piezas:6});
  expect(done.rows[1].candidates[0]).toMatchObject({sku:'LAL-2'});
  expect((await db.query<any>(`select read_id from reception_reads(null,'2026-11-17T11:30:00Z')`)).rows).toHaveLength(4); // other hub too
+ await db.query(`update documents set external_ref='mh-cumbres__pd-lala__2026-11-17__1' where id=$1`,[again]);
+ expect((await db.query<any>(`select read_id,external_ref from reception_reads(p_external_ref=>'mh-cumbres__pd-lala__2026-11-17__1')`)).rows).toEqual([{read_id:again,external_ref:'mh-cumbres__pd-lala__2026-11-17__1'}]);
+ expect((await db.query<any>(`select allowed_mime_types from storage.buckets where id='invoices'`)).rows[0].allowed_mime_types).toContain('image/webp');
 
  const as=async(user:string,sql:string)=>{await db.exec(`set role authenticated;set request.jwt.claim.sub='${user}';`);try{return (await db.query<any>(sql)).rows;}finally{await db.exec('reset role;reset request.jwt.claim.sub;');}};
  expect(await as(receiver,`select read_id from reception_reads(null,null)`)).toHaveLength(5); // only the hub they belong to
  expect(await as(outsider,`select read_id from reception_reads(null,null)`)).toHaveLength(0);
- const can=async(role:string)=>(await db.query<any>(`select has_function_privilege($1,'public.reception_reads(uuid,timestamptz)','execute') ok`,[role])).rows[0].ok;
+ const can=async(role:string)=>(await db.query<any>(`select has_function_privilege($1,'public.reception_reads(uuid,timestamptz,text)','execute') ok`,[role])).rows[0].ok;
  expect([await can('anon'),await can('authenticated'),await can('service_role')]).toEqual([false,true,true]);
  await expect(db.query(`insert into documents(org_id,session_id,purpose) select org_id,session_id,'otro' from documents limit 1`)).rejects.toThrow(/check/);
 },30000);

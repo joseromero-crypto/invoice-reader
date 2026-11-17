@@ -246,15 +246,17 @@ describe('lean match', () => {
         row({ codes: [topo, { header: 'CVEPROD', value: '50202310' }], description: 'AGUA MINERAL 600ML', quantities: ['5', '60'], mark: 'none' }),
         row({ codes: [{ header: 'CLAVE', value: 'ZZZ' }], description: 'TOPO CHICO AGUA MINERAL 600ML', quantities: ['1', null], unit: 'CAJAS', mark: 'none' }),
       ]);
-      const rec = receptionRecord(t, match(t, catalog, new Map(), recepcion));
+      const rec = receptionRecord(t, match(t, catalog, new Map(), recepcion), catalog);
       expect(rec.contract).toBe(RECEPTION_CONTRACT);
       expect(rec.rows[0]).toEqual({
         sourceRow: 1, sku: 'S', productName: 'Agua mineral Topo Chico 600ml', matchedBy: 'supplierSku', confident: true, piezas: 60, quantityOk: true,
         printedCodes: [topo, { header: 'CVEPROD', value: '50202310' }], printedDescription: 'AGUA MINERAL 600ML',
         printedQuantities: [{ header: 'CAJAS', value: '5' }, { header: 'PIEZAS', value: '60' }], printedUnit: null, candidates: [], notes: [],
+        matchKeys: ['1152', '7501055300000'],
       });
       expect(rec.rows[1]).toMatchObject({ sourceRow: 2, sku: null, productName: null, matchedBy: null, confident: false, piezas: null, quantityOk: false });
-      expect(rec.rows[1].candidates[0]).toEqual({ sku: 'S', name: 'Agua mineral Topo Chico 600ml', score: expect.any(Number) });
+      expect(rec.rows[1].candidates[0]).toEqual({ sku: 'S', name: 'Agua mineral Topo Chico 600ml', score: expect.any(Number), barcodes: ['7501055300000'], supplierSku: '1152' });
+      expect(rec.rows[1].matchKeys).toEqual(['ZZZ']);
       expect(rec.rows[1].notes.length).toBeGreaterThan(0);
       expect(JSON.parse(JSON.stringify(rec))).toEqual(rec);
     });

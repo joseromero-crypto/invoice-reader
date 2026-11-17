@@ -8,7 +8,8 @@ import {asProducts,catalog,cityItems,hubCity} from './workspace';
 import {leanMappings} from './rematch';
 import {requireHub} from './hubs';
 import {limits} from './config';
-import {authorize,check,HttpError} from './auth';
+import {adminClient,authorize,check,HttpError} from './auth';
+import {recepcionActor,signedWorker} from './recepcion';
 // Failures the receiver can't fix by retrying: no credit on the Anthropic account, or a bad/revoked key.
 export const NO_CREDIT='Error de lectura, favor de capturar directo en Retool y contactar a José para cargar créditos a la aplicación.';
 export function readFailure(error:string|null){
@@ -19,10 +20,16 @@ export function readFailure(error:string|null){
 // A database error is no use to a receiver, and the photo was fine: say what to do.
 export const SERVER_BUSY='El servidor está ocupado y no terminó la lectura. Reintenta en un momento o captura directo en Retool.';
 export const workerFailure=(e:unknown)=>!(e instanceof HttpError)?'No se pudo leer la factura. Reintenta o agrega los renglones a mano.':/statement timeout|upstream request timeout/i.test(e.message)?SERVER_BUSY:e.message;
-const isImage=(b:Buffer)=>(b[0]===0xff&&b[1]===0xd8)||(b[0]===0x89&&b[1]===0x50&&b[2]===0x4e&&b[3]===0x47);
+const isImage=(b:Buffer)=>(b[0]===0xff&&b[1]===0xd8)||(b[0]===0x89&&b[1]===0x50&&b[2]===0x4e&&b[3]===0x47)||(b.subarray(0,4).toString('latin1')==='RIFF'&&b.subarray(8,12).toString('latin1')==='WEBP');
+// A read sent by mh-recibo (server/recepcion.ts) carries a signature instead of a user's JWT and runs as its service account.
+async function worker(request:Request,jobId:string){
+ if(!signedWorker(request,jobId))return authorize(request);
+ const db=adminClient(),userId=recepcionActor(),job=check(await db.from('extraction_jobs').select('org_id').eq('id',jobId).maybeSingle());if(!job)throw new HttpError(404,'Job not found');
+ return {db,orgId:job.org_id as string,userId};
+}
 // Lean reader: photos → one transcription call (lean/transcribe.ts) → deterministic catalog match (lean/match.ts).
 export async function extractJob(request:Request,jobId:string){
- const {db,orgId,userId}=await authorize(request);
+ const {db,orgId,userId}=await worker(request,jobId);
  const job=check(await db.from('extraction_jobs').select('*').eq('id',jobId).eq('org_id',orgId).maybeSingle());if(!job||job.requested_by!==userId)throw new HttpError(404,'Job not found');
  const document=check(await db.from('documents').select('*').eq('id',job.document_id).eq('org_id',orgId).single())!;
  const receiving=check(await db.from('receiving_sessions').select('hub_id').eq('org_id',orgId).eq('id',document.session_id).single())!;
@@ -39,7 +46,7 @@ export async function extractJob(request:Request,jobId:string){
  for(const page of pages){
   if(!page.object_path.startsWith(`${orgId}/${document.id}/`))throw new HttpError(400,'Foto de otra organización.');
   const blob=check(await db.storage.from('invoices').download(page.object_path))!;if(blob.size>limits().maxUploadBytes)throw new HttpError(400,'Foto demasiado grande.');
-  const buffer=Buffer.from(await blob.arrayBuffer());if(!isImage(buffer))throw new HttpError(400,'La foto no es JPG/PNG.');
+  const buffer=Buffer.from(await blob.arrayBuffer());if(!isImage(buffer))throw new HttpError(400,'La foto no es JPG, PNG ni WebP.');
   if(createHash('sha256').update(buffer).digest('hex')!==page.content_hash)throw new HttpError(400,'La foto no coincide con la registrada.');
   images.push(await prepareImage(buffer));
  }
@@ -50,13 +57,13 @@ export async function extractJob(request:Request,jobId:string){
  const {city,rawProducts}=await loading,products=asProducts(rawProducts,city);
  // Reception reads (documents.purpose) use printed numbers only and give a product only when sure of it; mh-recibo reads raw.reception.
  const purpose=document.purpose==='recepcion'?'recepcion':'captura';
- const result=match(t,cityItems(rawProducts,city),await leanMappings(db,orgId,rawProducts),{mode:purpose});
+ const items=cityItems(rawProducts,city),result=match(t,items,await leanMappings(db,orgId,rawProducts),{mode:purpose});
  const supplier=result.supplier??t.supplier,reference=t.documentRef,warnings=[...result.warnings];
  if(read.error)warnings.push(`Lectura incompleta (${read.error}). Revisa que estén todos los renglones.`);
  // A reception read of the same invoice isn't a captured one: duplicates are only looked for among captura reads.
  if(reference&&supplier&&purpose==='captura'){const duplicates=check(await db.from('documents').select('id,receiving_sessions!inner(hub_id)').eq('org_id',orgId).eq('receiving_sessions.hub_id',receiving.hub_id).eq('purpose','captura').eq('supplier',supplier).eq('reference',reference).neq('id',document.id))!;if(duplicates.length)warnings.push('Posible factura duplicada: proveedor y referencia ya registrados en este hub.');}
  // finish_extraction copies supplier/reference/date/warnings from p_raw onto the document.
- const raw={supplier,reference,date:isoDate(t.date),printedTotal:null,printedPageCount:null,warnings,matchedSupplier:result.supplier,totalsOk:result.totalsOk,transcription:t,purpose,...(purpose==='recepcion'?{reception:receptionRecord(t,result)}:{})};
+ const raw={supplier,reference,date:isoDate(t.date),printedTotal:null,printedPageCount:null,warnings,matchedSupplier:result.supplier,totalsOk:result.totalsOk,transcription:t,purpose,...(purpose==='recepcion'?{reception:receptionRecord(t,result,items)}:{})};
  check(await db.rpc('finish_extraction',{p_job:job.id,p_actor:userId,p_raw:raw,p_rows:leanRows(t,result,products),p_usage:{...read.usage,stopReason:read.stopReason,seconds:read.seconds},p_model:model,p_duration:Date.now()-started,p_cost:read.costUsd,p_token:claimed.claim_token}));
  check(await db.from('extraction_jobs').update({prompt_version:'lean-v2'}).eq('org_id',orgId).eq('id',job.id));
  }catch(e){await fail(workerFailure(e));throw e;}
