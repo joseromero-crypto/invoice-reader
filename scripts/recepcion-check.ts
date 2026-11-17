@@ -37,6 +37,8 @@ const city=await hubCity(db,hub.id),raw=await catalog(db,city),items=cityItems(r
 const org=(await db.from('hubs').select('org_id').eq('id',hub.id).single()).data!.org_id;
 const result=match(t,items,await leanMappings(db,org,raw),{mode:'recepcion'});
 const rows=receptionRows(t,result,items);
+// The record as mh-recibo gets it (rows of one reception_reads row), for its unit tests.
+writeFileSync(`${DIR}/arca-DNL-5695519398-record.json`,JSON.stringify({supplier:result.supplier,printed_supplier:t.supplier,reference:t.documentRef,totals_ok:result.totalsOk,warnings:result.warnings,rows},null,2));
 
 const envio=JSON.parse(readFileSync(ENVIO,'utf8')),lines:any[]=envio.lines;
 const closed=(await db.from('rec_events').select('id,detalle').eq('session_id',SESSION).eq('tipo','cerrar').order('id',{ascending:false}).limit(1).single()).data!;
@@ -51,6 +53,7 @@ for(const r of rows){
  linked++;const got=received.get(hits[0].sku_key);
  // Would the printed codes alone have found it? If not, the Masterview barcode / SKU Proveedor made the link.
  const printed=new Set(r.printedCodes.map(c=>normCode(c.value)));if(![hits[0].sku_marca,hits[0].sku_key,hits[0].barcode].some(c=>c&&printed.has(normCode(String(c)))))bridged++;
+ const pedido=Number(hits[0].esperado);if(r.piezas!==null&&r.piezas>pedido)problems.push(`${label}: billed ${r.piezas} > pedido ${pedido}`);
  if(got===r.piezas)equal++;else problems.push(`${label} → "${hits[0].producto}": recibido ${got}`);
 }
 console.log(`Supplier ${result.supplier} | ref ${t.documentRef} | totalsOk ${result.totalsOk} | warnings ${JSON.stringify(result.warnings)}`);
