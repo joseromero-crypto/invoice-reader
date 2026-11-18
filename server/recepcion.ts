@@ -22,13 +22,14 @@ export function hubForSlug<H extends {name:string}>(hubs:H[],slug:string):H|null
 export interface RecEvent {id:number;tipo:string;hub:string;ts:string;receptor:string|null;detalle:any}
 // A session is real and current when: its id starts with a hub slug we know, it has an 'abrir' event from the last 24 h
 // for that hub, and the last admin delete/reopen isn't a 'borrar' (a reopen after a delete brings it back).
-export function checkSession<H extends {name:string}>(sessionId:string,events:RecEvent[],hubs:H[],now=Date.now()):{hub:H;receptor:string|null}{
+// hours: how old the 'abrir' may be (24 for uploads; photos allows the list's 7 days, so a late close can still look).
+export function checkSession<H extends {name:string}>(sessionId:string,events:RecEvent[],hubs:H[],now=Date.now(),hours=SESSION_HOURS):{hub:H;receptor:string|null}{
  const slug=sessionId.split('__')[0]??'',hub=hubForSlug(hubs,slug);
  if(!hub)throw new HttpError(404,'Hub de mh-recibo desconocido.');
  const sorted=[...events].sort((a,b)=>a.id-b.id);
  const opened=sorted.filter(e=>e.tipo==='abrir'&&e.hub===slug).at(-1);
  if(!opened)throw new HttpError(404,'Recepción no encontrada.');
- if(now-new Date(opened.ts).getTime()>SESSION_HOURS*3600e3)throw new HttpError(410,'La recepción tiene más de 24 horas.');
+ if(now-new Date(opened.ts).getTime()>hours*3600e3)throw new HttpError(410,`La recepción tiene más de ${hours>48?Math.round(hours/24)+' días':hours+' horas'}.`);
  const admin=sorted.filter(e=>e.tipo==='admin'&&['borrar','reabrir'].includes(e.detalle?.accion)).at(-1);
  if(admin?.detalle?.accion==='borrar')throw new HttpError(410,'La recepción fue borrada.');
  return {hub,receptor:opened.receptor??null};
@@ -55,10 +56,10 @@ async function actorOrg(db:SupabaseClient,actor:string){
  if(m.length!==1||m[0].role!=='admin')throw new HttpError(503,'RECEPCION_ACTOR_ID debe ser un admin de una sola organización.');
  return m[0].org_id as string;
 }
-async function sessionHub(db:SupabaseClient,orgId:string,sessionId:string){
+async function sessionHub(db:SupabaseClient,orgId:string,sessionId:string,hours=SESSION_HOURS){
  const events=check(await db.from('rec_events').select('id,tipo,hub,ts,receptor,detalle').eq('session_id',sessionId).in('tipo',['abrir','admin']).order('id'))! as RecEvent[];
  const hubs=check(await db.from('hubs').select('id,name').eq('org_id',orgId).eq('active',true))!;
- return checkSession(sessionId,events,hubs);
+ return checkSession(sessionId,events,hubs,Date.now(),hours);
 }
 const pagePath=(orgId:string,documentId:string,n:number)=>`${orgId}/${documentId}/page-${n}`;
 const isPhoto=(b:Buffer)=>(b[0]===0xff&&b[1]===0xd8)||(b[0]===0x89&&b[1]===0x50&&b[2]===0x4e&&b[3]===0x47)||(b.subarray(0,4).toString('latin1')==='RIFF'&&b.subarray(8,12).toString('latin1')==='WEBP');
@@ -172,7 +173,7 @@ export async function listHub(slug:string,since:string|null){
 // session's own or one not linked anywhere (the ones list offers). Links last 10 minutes; ask again to reopen.
 export async function photos(sessionId:string,readId:string){
  const db=adminClient(),orgId=await actorOrg(db,recepcionActor());
- const {hub}=await sessionHub(db,orgId,sessionId);
+ const {hub}=await sessionHub(db,orgId,sessionId,LIST_DAYS*24);
  const d=check(await db.from('documents').select('id,external_ref,receiving_sessions!inner(hub_id)').eq('org_id',orgId).eq('id',readId).maybeSingle()) as any;
  if(!d||d.receiving_sessions.hub_id!==hub.id||(d.external_ref&&d.external_ref!==sessionId))throw new HttpError(404,'Lectura no encontrada.');
  const pages=check(await db.from('source_pages').select('page_number,object_path').eq('org_id',orgId).eq('document_id',readId).order('page_number'))!;

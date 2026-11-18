@@ -45,6 +45,10 @@ describe('mh-recibo session check',()=>{
  it('refuses a session with no abrir event',()=>expect(()=>checkSession(id,[ev(2,'admin','2026-11-16T17:00:00Z',{accion:'reabrir'})],hubs,now)).toThrow(/no encontrada/));
  it('refuses an abrir from another hub',()=>expect(()=>checkSession(id,[ev(1,'abrir','2026-11-16T16:22:53Z',null,'mh-cumbres')],hubs,now)).toThrow(/no encontrada/));
  it('refuses a session opened more than 24 h ago',()=>expect(()=>checkSession(id,[open],hubs,Date.parse('2026-11-17T16:30:00Z'))).toThrow(/24 horas/));
+ it('photos allow a 7-day-old session',()=>{
+  expect(checkSession(id,[open],hubs,Date.parse('2026-11-20T16:30:00Z'),7*24).hub.id).toBe('1');
+  expect(()=>checkSession(id,[open],hubs,Date.parse('2026-11-24T16:30:00Z'),7*24)).toThrow(/7 días/);
+ });
  it('refuses a deleted session, unless reopened after',()=>{
   expect(()=>checkSession(id,[open,ev(5,'admin','2026-11-16T17:00:00Z',{accion:'borrar'})],hubs,now)).toThrow(/borrada/);
   expect(checkSession(id,[open,ev(5,'admin','2026-11-16T17:00:00Z',{accion:'borrar'}),ev(6,'admin','2026-11-16T17:05:00Z',{accion:'reabrir'})],hubs,now).hub.id).toBe('1');
