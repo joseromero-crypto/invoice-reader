@@ -1,7 +1,7 @@
 import {createHmac,createHash,timingSafeEqual} from 'node:crypto';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {match} from '../lean/match.ts';
-import {receptionRows} from '../lean/reception.ts';
+import {RECEPTION_CONTRACT,receptionRows} from '../lean/reception.ts';
 import type {Transcription} from '../lean/transcribe.ts';
 import {adminClient,check,HttpError} from './auth';
 import {limits} from './config';
@@ -100,9 +100,10 @@ export async function submit(request:Request,sessionId:string,documentId:string)
  return {status:'queued'};
 }
 
-// Reads saved before matchKeys existed are rebuilt from the saved transcription and the current catalog (free).
+// Captura scans read before Nov 17 have no reception record: their rows are built here, like old reads.
+// A read is rebuilt when it's done and has no rows or rows without matchKeys (free: saved transcription + current catalog).
 async function withMatchKeys(db:SupabaseClient,orgId:string,reads:any[]){
- const stale=reads.filter(r=>r.status==='done'&&r.rows.some((row:any)=>!Array.isArray(row.matchKeys)));if(!stale.length)return reads;
+ const stale=reads.filter(r=>r.status==='done'&&(!r.rows.length||r.rows.some((row:any)=>!Array.isArray(row.matchKeys))));if(!stale.length)return reads;
  const jobs=check(await db.from('extraction_jobs').select('document_id,raw_result').eq('org_id',orgId).in('document_id',stale.map(r=>r.read_id)))!;
  const mappingsFor=new Map<string,any>();
  for(const read of stale){
@@ -114,16 +115,68 @@ async function withMatchKeys(db:SupabaseClient,orgId:string,reads:any[]){
  }
  return reads;
 }
+
+// The same shape public.reception_reads() returns, for a captura document (that function only returns recepcion ones).
+export function captureRead(d:any,j:any,hub:{id:string;name:string;city:string|null},now=Date.now()){
+ const dead=!!j&&((j.status==='processing'&&j.lease_until&&new Date(j.lease_until).getTime()<now)||(j.status==='queued'&&new Date(j.created_at).getTime()<now-120e3));
+ const raw=j?.raw_result??{};
+ return {read_id:d.id,contract_version:RECEPTION_CONTRACT,hub_id:hub.id,hub_name:hub.name,hub_city:hub.city,created_at:d.created_at,
+  status:j?.status==='complete'?'done':j&&(['failed','uncertain'].includes(j.status)||dead)?'failed':'processing',
+  error:j&&['failed','uncertain'].includes(j.status)?j.error:dead?'La lectura no terminó.':null,
+  requested_by:j?.requested_by??null,
+  supplier:raw.matchedSupplier||d.supplier||null,printed_supplier:raw.transcription?.supplier||null,
+  reference:d.reference??null,invoice_date:d.invoice_date??null,totals_ok:typeof raw.totalsOk==='boolean'?raw.totalsOk:null,
+  warnings:d.warnings??[],rows:(j?.status==='complete'?raw.reception?.rows:null)??[] as any[],external_ref:null,purpose:'captura'};
+}
+
+// "LALA · CWB-02783952 · 17 nov · 9:05 a. m. · José Romero" (Monterrey time), for mh-recibo's pick list.
+const MTY='America/Monterrey';
+export function readLabel(r:{supplier:string|null;printed_supplier:string|null;reference:string|null;created_at:string;scanned_by:string|null}){
+ const at=new Date(r.created_at);
+ const day=new Intl.DateTimeFormat('es-MX',{timeZone:MTY,day:'numeric',month:'short'}).format(at).replace('.','');
+ const time=new Intl.DateTimeFormat('es-MX',{timeZone:MTY,hour:'numeric',minute:'2-digit'}).format(at);
+ return [r.supplier||r.printed_supplier||'Proveedor sin identificar',r.reference||'Sin folio',day,time,r.scanned_by].filter(Boolean).join(' · ');
+}
+// Who scanned it: the Google account's name, else the email before the @. mh-recibo's own uploads say "MH Recibo".
+export const personName=(u:any)=>{const n=String(u?.user_metadata?.full_name??u?.user_metadata?.name??'').trim();return n||(u?.email?String(u.email).split('@')[0]:null);};
+async function withNames(db:SupabaseClient,reads:any[]){
+ const actor=recepcionActor(),names=new Map<string,string|null>();
+ for(const id of new Set(reads.map(r=>r.requested_by).filter(Boolean))){
+  if(id===actor){names.set(id,'MH Recibo');continue;}
+  const got=await db.auth.admin.getUserById(id);names.set(id,got.error?null:personName(got.data.user));
+ }
+ for(const r of reads){r.purpose??='recepcion';r.scanned_by=r.requested_by?names.get(r.requested_by)??null:null;r.label=readLabel(r);}
+ return reads;
+}
+
 export async function readSession(sessionId:string){
  const db=adminClient(),orgId=await actorOrg(db,recepcionActor());
  const reads=check(await db.rpc('reception_reads',{p_external_ref:sessionId}))! as any[];
- return {reads:await withMatchKeys(db,orgId,reads)};
+ return {reads:await withNames(db,await withMatchKeys(db,orgId,reads))};
 }
-// Reads scanned in Invoice Reader (no external_ref) for that hub, so mh-recibo can offer one when none is linked.
+// Reads scanned in Invoice Reader (no external_ref) for that hub, in either mode, so mh-recibo can offer one when none
+// is linked. Newest first.
 export async function listHub(slug:string,since:string|null){
  const db=adminClient(),orgId=await actorOrg(db,recepcionActor());
- const hub=hubForSlug(check(await db.from('hubs').select('id,name').eq('org_id',orgId).eq('active',true))!,slug);if(!hub)throw new HttpError(404,'Hub de mh-recibo desconocido.');
+ const hub=hubForSlug(check(await db.from('hubs').select('id,name,city').eq('org_id',orgId).eq('active',true))!,slug);if(!hub)throw new HttpError(404,'Hub de mh-recibo desconocido.');
  const floor=Date.now()-LIST_DAYS*864e5,from=new Date(Math.max(floor,since?new Date(since).getTime():floor)).toISOString();
- const reads=(check(await db.rpc('reception_reads',{p_hub_id:hub.id,p_since:from}))! as any[]).filter(r=>!r.external_ref);
- return {reads:await withMatchKeys(db,orgId,reads)};
+ const reception=(check(await db.rpc('reception_reads',{p_hub_id:hub.id,p_since:from}))! as any[]).filter(r=>!r.external_ref);
+ const docs=check(await db.from('documents').select('id,created_at,supplier,reference,invoice_date,warnings,receiving_sessions!inner(hub_id)').eq('org_id',orgId).eq('purpose','captura').eq('receiving_sessions.hub_id',hub.id).gte('created_at',from).order('created_at',{ascending:false}).limit(200))! as any[];
+ const jobs=docs.length?check(await db.from('extraction_jobs').select('document_id,status,error,requested_by,lease_until,created_at,raw_result').eq('org_id',orgId).in('document_id',docs.map(d=>d.id)))!:[];
+ const captura=docs.map(d=>captureRead(d,jobs.find(j=>j.document_id===d.id),hub));
+ const reads=[...reception,...captura].sort((a,b)=>b.created_at.localeCompare(a.created_at)||String(b.read_id).localeCompare(String(a.read_id)));
+ return {reads:await withNames(db,await withMatchKeys(db,orgId,reads))};
+}
+
+// "Ver foto": short-lived links to a read's photos, for a real mh-recibo session of the same hub. The read must be that
+// session's own or one not linked anywhere (the ones list offers). Links last 10 minutes; ask again to reopen.
+export async function photos(sessionId:string,readId:string){
+ const db=adminClient(),orgId=await actorOrg(db,recepcionActor());
+ const {hub}=await sessionHub(db,orgId,sessionId);
+ const d=check(await db.from('documents').select('id,external_ref,receiving_sessions!inner(hub_id)').eq('org_id',orgId).eq('id',readId).maybeSingle()) as any;
+ if(!d||d.receiving_sessions.hub_id!==hub.id||(d.external_ref&&d.external_ref!==sessionId))throw new HttpError(404,'Lectura no encontrada.');
+ const pages=check(await db.from('source_pages').select('page_number,object_path').eq('org_id',orgId).eq('document_id',readId).order('page_number'))!;
+ if(!pages.length)return {photos:[]};
+ const signed=check(await db.storage.from('invoices').createSignedUrls(pages.map(p=>p.object_path),600))!;
+ return {photos:pages.map((p,i)=>({page:p.page_number,url:signed[i]?.signedUrl??null})).filter(p=>p.url)};
 }

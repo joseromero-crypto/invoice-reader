@@ -57,13 +57,15 @@ export async function extractJob(request:Request,jobId:string){
  const {city,rawProducts}=await loading,products=asProducts(rawProducts,city);
  // Reception reads (documents.purpose) use printed numbers only and give a product only when sure of it; mh-recibo reads raw.reception.
  const purpose=document.purpose==='recepcion'?'recepcion':'captura';
- const items=cityItems(rawProducts,city),result=match(t,items,await leanMappings(db,orgId,rawProducts),{mode:purpose});
+ const items=cityItems(rawProducts,city),mappings=await leanMappings(db,orgId,rawProducts),result=match(t,items,mappings,{mode:purpose});
+ // Every read saves the reception record (captura ones too, matched again in reception mode, free) so mh-recibo can offer it.
+ const reception=receptionRecord(t,purpose==='recepcion'?result:match(t,items,mappings,{mode:'recepcion'}),items);
  const supplier=result.supplier??t.supplier,reference=t.documentRef,warnings=[...result.warnings];
  if(read.error)warnings.push(`Lectura incompleta (${read.error}). Revisa que estén todos los renglones.`);
  // A reception read of the same invoice isn't a captured one: duplicates are only looked for among captura reads.
  if(reference&&supplier&&purpose==='captura'){const duplicates=check(await db.from('documents').select('id,receiving_sessions!inner(hub_id)').eq('org_id',orgId).eq('receiving_sessions.hub_id',receiving.hub_id).eq('purpose','captura').eq('supplier',supplier).eq('reference',reference).neq('id',document.id))!;if(duplicates.length)warnings.push('Posible factura duplicada: proveedor y referencia ya registrados en este hub.');}
  // finish_extraction copies supplier/reference/date/warnings from p_raw onto the document.
- const raw={supplier,reference,date:isoDate(t.date),printedTotal:null,printedPageCount:null,warnings,matchedSupplier:result.supplier,totalsOk:result.totalsOk,transcription:t,purpose,...(purpose==='recepcion'?{reception:receptionRecord(t,result,items)}:{})};
+ const raw={supplier,reference,date:isoDate(t.date),printedTotal:null,printedPageCount:null,warnings,matchedSupplier:result.supplier,totalsOk:result.totalsOk,transcription:t,purpose,reception};
  check(await db.rpc('finish_extraction',{p_job:job.id,p_actor:userId,p_raw:raw,p_rows:leanRows(t,result,products),p_usage:{...read.usage,stopReason:read.stopReason,seconds:read.seconds},p_model:model,p_duration:Date.now()-started,p_cost:read.costUsd,p_token:claimed.claim_token}));
  check(await db.from('extraction_jobs').update({prompt_version:'lean-v2'}).eq('org_id',orgId).eq('id',job.id));
  }catch(e){await fail(workerFailure(e));throw e;}

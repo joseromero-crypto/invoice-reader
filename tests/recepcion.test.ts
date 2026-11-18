@@ -2,7 +2,7 @@ import {it,expect,describe} from 'vitest';
 import {match,type CatalogItem} from '../lean/match.ts';
 import {receptionRows} from '../lean/reception.ts';
 import type {Transcription} from '../lean/transcribe.ts';
-import {checkSession,corsHeaders,hubSlug,hubForSlug,workerSignature,signedWorker,type RecEvent} from '../server/recepcion.ts';
+import {captureRead,checkSession,corsHeaders,hubSlug,hubForSlug,personName,readLabel,workerSignature,signedWorker,type RecEvent} from '../server/recepcion.ts';
 import handler from '../netlify/functions/recepcion.ts';
 
 const t:Transcription={supplier:'ARCA CONTINENTAL',documentRef:'DNL 1',date:'16/11/2026',quantityColumns:['CAJAS','PIEZAS'],printedTotals:[],rows:[
@@ -75,5 +75,29 @@ describe('CORS and worker signature',()=>{
   expect(signedWorker(req(),'job-1')).toBe(false);
   expect(signedWorker(req(workerSignature('job-1')),'job-1')).toBe(true);
   expect(()=>signedWorker(req(workerSignature('job-2')),'job-1')).toThrow(/signature/);
+ });
+});
+
+describe('captura scans in the list',()=>{
+ const hub={id:'h',name:'MH Contry',city:'Monterrey'},now=Date.parse('2026-11-17T23:00:00Z');
+ const d={id:'d1',created_at:'2026-11-17T22:12:05Z',supplier:'Arca Continental',reference:'DNL 5695688139',invoice_date:'2026-11-17',warnings:[]};
+ it('has the reception_reads shape, marked captura, rows left for the rebuild',()=>{
+  const r=captureRead(d,{status:'complete',requested_by:'u1',raw_result:{matchedSupplier:'Arca Continental',totalsOk:true,transcription:{supplier:'DISTRIBUIDORA ARCA CONTINENTAL'}}},hub,now);
+  expect(r).toMatchObject({read_id:'d1',contract_version:1,hub_name:'MH Contry',status:'done',error:null,supplier:'Arca Continental',printed_supplier:'DISTRIBUIDORA ARCA CONTINENTAL',reference:'DNL 5695688139',totals_ok:true,rows:[],external_ref:null,purpose:'captura',requested_by:'u1'});
+ });
+ it('status follows the job like the SQL function',()=>{
+  expect(captureRead(d,undefined,hub,now).status).toBe('processing');
+  expect(captureRead(d,{status:'failed',error:'x'},hub,now)).toMatchObject({status:'failed',error:'x'});
+  expect(captureRead(d,{status:'queued',created_at:'2026-11-17T22:50:00Z'},hub,now)).toMatchObject({status:'failed',error:'La lectura no terminó.'});
+  expect(captureRead(d,{status:'processing',lease_until:'2026-11-17T23:05:00Z'},hub,now).status).toBe('processing');
+ });
+ it('labels a read supplier · folio · day · time (Monterrey) · who',()=>{
+  expect(readLabel({supplier:'Arca Continental',printed_supplier:null,reference:'DNL 5695688139',created_at:'2026-11-17T22:12:05Z',scanned_by:'José Romero'})).toMatch(/^Arca Continental · DNL 5695688139 · 17 nov · 4:12 p\.?\s?m\.? · José Romero$/);
+  expect(readLabel({supplier:null,printed_supplier:'BIMBO S.A.',reference:null,created_at:'2026-11-13T15:05:39Z',scanned_by:null})).toMatch(/^BIMBO S\.A\. · Sin folio · 13 nov · 9:05/);
+ });
+ it('names the scanner from the Google account',()=>{
+  expect(personName({user_metadata:{full_name:'Ana Pérez'},email:'ana@calii.com'})).toBe('Ana Pérez');
+  expect(personName({user_metadata:{},email:'ana.perez@calii.com'})).toBe('ana.perez');
+  expect(personName(null)).toBeNull();
  });
 });
