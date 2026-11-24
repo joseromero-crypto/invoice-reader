@@ -3,10 +3,12 @@ import {randomUUID} from 'node:crypto';
 import {authorize,check,failure,HttpError} from '../../server/auth';
 import {citySlug} from '../../shared/catalog';
 import {latestCsv,readJob,writeJob} from '../../server/masterview';
+import {cityStatus} from '../../shared/masterview';
 import {unmatchedReport} from '../../server/unmatched';
 const STALE_JOB=15*60000;
 const Input=z.discriminatedUnion('action',[
  z.object({action:z.literal('status')}),
+ z.object({action:z.literal('job')}),
  z.object({action:z.literal('unmatched')}),
  z.object({action:z.literal('prepare'),cities:z.array(z.string().trim().min(1).max(80)).min(1).max(8)}),
  z.object({action:z.literal('start'),paths:z.array(z.string().max(200)).min(1).max(8),confirmDrop:z.boolean()}),
@@ -16,7 +18,10 @@ export default async function handler(request:Request){try{
  const {db,orgId,role,token}=await authorize(request);
  if(role!=='admin')throw new HttpError(403,'Se requiere acceso de administrador para Masterview.');
  const parsed=Input.safeParse(await request.json());if(!parsed.success)throw new HttpError(400,'Solicitud de Masterview inválida.');const b=parsed.data;
- const cities=async()=>{const rows=check(await db.rpc('mv_city_status'))! as {city:string;rows:number;updated_at:string}[];return rows;};
+ // What the screen polls during an import: one small file, no tables.
+ if(b.action==='job')return Response.json({job:await readJob(db)});
+ const running=async()=>{const job=await readJob(db);if(job?.state==='running'&&Date.now()-new Date(job.startedAt).getTime()<STALE_JOB)throw new HttpError(409,'Ya hay una importación en curso.');};
+ const cities=async()=>cityStatus(check(await db.from('mv_imports').select('uploaded_at,cities:report->cities').order('uploaded_at',{ascending:false})) as any);
  if(b.action==='status'){
  const [list,last,job]=await Promise.all([cities(),db.from('mv_imports').select('id,uploaded_at,uploaded_by,report').order('uploaded_at',{ascending:false}).limit(1).maybeSingle().then(r=>check(r)),readJob(db)]);
  const email=last?.uploaded_by?(await db.auth.admin.getUserById(last.uploaded_by)).data.user?.email??null:null;
@@ -25,10 +30,11 @@ export default async function handler(request:Request){try{
  if(b.action==='unmatched')return Response.json(await unmatchedReport(db,orgId));
  // Files go straight from the browser to a private path; the import moves them to latest.csv only if it succeeds.
  if(b.action==='prepare'){
+ await running();
  const uploads=await Promise.all(b.cities.map(async city=>{const path=`masterview/${citySlug(city)}/incoming-${randomUUID()}.csv`;const signed=check(await db.storage.from('catalogs').createSignedUploadUrl(path))!;return {city,path,token:signed.token};}));
  return Response.json({uploads});
  }
- const current=await readJob(db);if(current?.state==='running'&&Date.now()-new Date(current.startedAt).getTime()<STALE_JOB)throw new HttpError(409,'Ya hay una importación en curso.');
+ await running();
  const paths=b.action==='reread'?(await cities()).map(c=>latestCsv(c.city)):b.paths;
  if(!paths.length)throw new HttpError(409,'Todavía no hay archivos guardados.');
  if(paths.some(p=>!/^masterview\/[a-z0-9-]+\/(latest|incoming-[a-f0-9-]{36})\.csv$/.test(p)))throw new HttpError(400,'Referencia de archivo inválida.');

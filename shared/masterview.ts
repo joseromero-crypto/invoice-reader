@@ -60,6 +60,11 @@ export function planImport(files:MvFile[],state:MvState,options:{confirmDrop?:bo
  const report:MvReport={cities,nameVariants,barcodeConflicts,retired,added,updated,unchanged,warnings};
  return {errors,drops,warnings,cities:[...uploaded],products,rows:files.flatMap(f=>f.rows.map(row=>({city:f.city!,row}))),report};
 }
+// Rows per city and when each was last replaced, from the saved import reports (newest first). Counting mv_product_city
+// instead timed out while an import was writing it, so the screen showed an error for imports that had worked.
+export function cityStatus(imports:{uploaded_at:string;cities:MvReport['cities']|null}[]){
+ return Object.entries(imports[0]?.cities??{}).map(([city,c])=>({city,rows:c.rows,updated_at:(imports.find(i=>i.cities?.[city]?.replaced)??imports[0]).uploaded_at}));
+}
 // Arguments for the import_mv RPC. The city barcode is stored only when it differs from the product's; the RPC recomputes that.
 export const importPayload=(plan:ReturnType<typeof planImport>)=>({p_cities:plan.cities,p_products:plan.products.map(({id:_,...p})=>p),p_rows:plan.rows.map(({city,row})=>({sku:row.sku,city,retool_id:row.retoolId,name:row.name,proveedor:row.proveedor,sku_proveedor:row.skuProveedor,unidad_compra:row.unidadCompra,piezas_por_unidad:row.piezasPorUnidad,deshabilitar_compras:row.deshabilitarCompras,tiers:row.tiers,raw:row.cityRaw}))});
 // masterview/latest.json for the static apps: barcode entries are objects, name entries plain strings (what Sorting Hub reads today).

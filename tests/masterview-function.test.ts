@@ -3,6 +3,7 @@ const state=vi.hoisted(()=>({role:'admin',db:null as any}));
 vi.mock('../server/auth',async original=>({...(await original<any>()),authorize:async()=>({db:state.db,userId:'user',orgId:'org',role:state.role,token:'t'})}));
 import catalog from '../netlify/functions/catalog';
 import background from '../netlify/functions/catalog-background';
+import {cityStatus} from '../shared/masterview';
 import {publishMasterview,runJob,type MvJob} from '../server/masterview';
 const header='id,sku,Item,city,Código de Barras,Image URL,Proveedor';
 function fakeDB({csv=`${header}\n1,A,Uno,Monterrey,111,https://i/a,P`,fail=''}={}){
@@ -52,3 +53,13 @@ it('a failed database write publishes nothing',async()=>{
  expect(state.db.writes).toEqual(['catalogs/masterview/job.json']);expect((await lastJob(state.db)).state).toBe('failed');
 });
 it('never publishes an empty Masterview',async()=>{await expect(publishMasterview(state.db)).rejects.toThrow(/no tiene importaciones/);expect(state.db.writes).toEqual([]);});
+it('polling reads only the job file, and a second upload is refused before any file is sent',async()=>{
+ await state.db.storage.from('catalogs').upload('masterview/job.json',new Blob([JSON.stringify(job)]));
+ const polled=await catalog(post({action:'job'}));expect((await polled.json()).job).toMatchObject({id:job.id,state:'running'});
+ expect((await catalog(post({action:'prepare',cities:['Monterrey']}))).status).toBe(409);
+});
+it('city counts come from the import reports: newest rows, date of the last import that replaced the city',()=>{
+ const c=(rows:number,replaced:boolean)=>({rows,replaced,exclusives:0,missingVsMonterrey:0});
+ expect(cityStatus([{uploaded_at:'3',cities:{Monterrey:c(9,true),CDMX:c(5,false)}},{uploaded_at:'2',cities:{Monterrey:c(8,true),CDMX:c(5,true)}}])).toEqual([{city:'Monterrey',rows:9,updated_at:'3'},{city:'CDMX',rows:5,updated_at:'2'}]);
+ expect(cityStatus([])).toEqual([]);
+});

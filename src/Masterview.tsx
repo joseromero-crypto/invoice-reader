@@ -2,13 +2,13 @@ import {useEffect,useRef,useState} from 'react';
 import {ArrowLeft,Check,LoaderCircle,RefreshCw,TriangleAlert,Upload,X} from 'lucide-react';
 import {CITY_PRIORITY,cityRank,parseMasterviewFile} from '../shared/catalog';
 import type {MvReport} from '../shared/masterview';
-import {api,supabase} from './lib/supabase';
+import {api,SESSION_EXPIRED,supabase} from './lib/supabase';
 import UnmatchedReport from './UnmatchedReport';
 type CityStatus={city:string;rows:number;updated_at:string};
 type Job={id:string;state:'running'|'done'|'failed';error?:string};
 type Status={cities:CityStatus[];last:{id:string;uploaded_at:string;uploaded_by:string|null;report:MvReport&{files?:{city:string;rows:number}[]}}|null;job:Job|null};
 type Picked={key:string;file:File;city:string|null;rows:number;errors:string[];warnings:string[]};
-const POLL_MS=3000,DROP_LIMIT=0.9;
+const POLL_MS=3000,POLL_LIMIT=15*60000,DROP_LIMIT=0.9;
 const count=(n:number)=>n.toLocaleString('es-MX');
 const shortDate=(at:string)=>new Date(at).toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit'});
 const fullDate=(at:string)=>new Date(at).toLocaleString('es-MX',{dateStyle:'medium',timeStyle:'short'});
@@ -21,12 +21,24 @@ async function inspect(file:File):Promise<Picked>{
  return {...base,city:parsed.city,rows:parsed.rows.length,errors:parsed.errors,warnings:parsed.warnings};
 }
 export default function Masterview({onClose}:{onClose:()=>void}){
- const [status,setStatus]=useState<Status|null>(null),[picked,setPicked]=useState<Picked[]>([]),[busy,setBusy]=useState(false),[running,setRunning]=useState(false),[confirmDrop,setConfirmDrop]=useState(false),[error,setError]=useState(''),[done,setDone]=useState('');
+ const [status,setStatus]=useState<Status|null>(null),[picked,setPicked]=useState<Picked[]>([]),[busy,setBusy]=useState(false),[running,setRunning]=useState(false),[confirmDrop,setConfirmDrop]=useState(false),[error,setError]=useState(''),[keptCatalog,setUnchanged]=useState(false),[done,setDone]=useState('');
  const input=useRef<HTMLInputElement>(null),waiting=useRef<string|null>(null);
  const refresh=async()=>{const next:Status=await api('catalog',{action:'status'});setStatus(next);return next;};
  useEffect(()=>{let active=true;refresh().then(s=>{if(active&&s.job?.state==='running'){waiting.current=s.job.id;setRunning(true);}}).catch(e=>active&&setError((e as Error).message));return()=>{active=false;};},[]);
- useEffect(()=>{if(!running)return;const timer=setInterval(async()=>{try{const s=await refresh();if(s.job?.id!==waiting.current||s.job?.state==='running')return;setRunning(false);setBusy(false);if(s.job.state==='failed')setError(s.job.error??'La importación falló; no se cambió el catálogo.');else{setPicked([]);setConfirmDrop(false);setDone('Masterview actualizado y publicado para las otras apps.');}}catch(e){setRunning(false);setBusy(false);setError((e as Error).message);}},POLL_MS);return()=>clearInterval(timer);},[running]);
- async function choose(files:FileList|null){if(!files?.length)return;setBusy(true);setError('');setDone('');try{const added=await Promise.all([...files].map(inspect));setPicked(old=>[...old.filter(o=>!added.some(a=>a.key===o.key)),...added]);}finally{setBusy(false);if(input.current)input.current.value='';}}
+ // One poll at a time. A failed poll says nothing about the import, so keep asking; after POLL_LIMIT say the result is unknown.
+ useEffect(()=>{if(!running)return;let active=true;const started=Date.now();const pause=()=>new Promise(r=>setTimeout(r,POLL_MS));
+  (async()=>{while(active){
+   await pause();if(!active)return;
+   let job:Job|null=null;try{job=(await api('catalog',{action:'job'}) as {job:Job|null}).job;}catch(e){if((e as Error).message===SESSION_EXPIRED){if(active){setRunning(false);setBusy(false);setError((e as Error).message);}return;}}
+   if(!active)return;
+   if(!job||job.state==='running'){if(Date.now()-started<POLL_LIMIT)continue;setRunning(false);setBusy(false);setError('No se pudo confirmar el resultado. Recarga la página y revisa "Última actualización" antes de subir otra vez.');return;}
+   const ours=job.id===waiting.current;
+   if(ours&&job.state==='failed'){setUnchanged(true);setError(job.error??'La importación falló; no se cambió el catálogo.');}
+   else if(ours){setPicked([]);setConfirmDrop(false);setDone('Masterview actualizado y publicado para las otras apps.');}
+   else setError('Otra importación empezó después de esta. Revisa "Última actualización".');
+   setBusy(false);await refresh().catch(()=>{});if(active)setRunning(false);return;
+  }})();return()=>{active=false;};},[running]);
+ async function choose(files:FileList|null){if(!files?.length)return;setBusy(true);setUnchanged(false);setError('');setDone('');try{const added=await Promise.all([...files].map(inspect));setPicked(old=>[...old.filter(o=>!added.some(a=>a.key===o.key)),...added]);}finally{setBusy(false);if(input.current)input.current.value='';}}
  const previous=new Map(status?.cities.map(c=>[c.city,c])??[]);
  const repeated=(p:Picked)=>!!p.city&&picked.filter(o=>o.city===p.city).length>1;
  const drop=(p:Picked)=>{const before=previous.get(p.city??'')?.rows??0;return !p.errors.length&&p.rows<before*DROP_LIMIT?before:0;};
@@ -34,7 +46,7 @@ export default function Masterview({onClose}:{onClose:()=>void}){
  const drops=picked.filter(drop),valid=picked.length>0&&picked.every(p=>!rowErrors(p).length&&p.city)&&(!drops.length||confirmDrop);
  const allCities=[...new Set([...CITY_PRIORITY,...(status?.cities.map(c=>c.city)??[])])].sort((a,b)=>cityRank(a)-cityRank(b));
  const unchanged=allCities.filter(c=>!picked.some(p=>p.city===c));
- async function start(action:()=>Promise<{job:Job}>){setBusy(true);setError('');setDone('');try{const {job}=await action();waiting.current=job.id;setRunning(true);}catch(e){setBusy(false);setError((e as Error).message);}}
+ async function start(action:()=>Promise<{job:Job}>){setBusy(true);setUnchanged(false);setError('');setDone('');try{const {job}=await action();waiting.current=job.id;setRunning(true);}catch(e){setBusy(false);setError((e as Error).message);}}
  const upload=()=>start(async()=>{
   const {uploads}=await api('catalog',{action:'prepare',cities:picked.map(p=>p.city)}) as {uploads:{city:string;path:string;token:string}[]};
   await Promise.all(uploads.map(async u=>{const file=picked.find(p=>p.city===u.city)!.file;const sent=await supabase!.storage.from('catalogs').uploadToSignedUrl(u.path,u.token,file,{contentType:'text/csv'});if(sent.error)throw sent.error;}));
@@ -52,7 +64,7 @@ export default function Masterview({onClose}:{onClose:()=>void}){
    {drops.length>0&&<label className="masterview-confirm"><input type="checkbox" checked={confirmDrop} disabled={busy} onChange={e=>setConfirmDrop(e.target.checked)}/> Sí, es correcto</label>}
    {picked.length>0&&<button className="primary wide" disabled={busy||!valid} onClick={upload}>{busy?<LoaderCircle size={17} className="spin"/>:<Upload size={17}/>} {running?'Importando…':'Subir'}</button>}
    {running&&<p className="catalog-help" role="status">Importando. Tarda alrededor de un minuto; puedes dejar esta página abierta.</p>}
-   {error&&<div className="catalog-errors" role="alert"><strong><TriangleAlert size={15}/> No se cambió el catálogo.</strong><p>{error}</p></div>}
+   {error&&<div className="catalog-errors" role="alert"><strong><TriangleAlert size={15}/> {keptCatalog?'No se cambió el catálogo.':'Hubo un problema.'}</strong><p>{error}</p></div>}
    {done&&<p className="catalog-help" role="status">{done}</p>}
   </div>
   <div className="masterview-card">
