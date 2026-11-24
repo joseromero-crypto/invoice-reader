@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { match, type CatalogItem } from '../lean/match.ts';
+import { match, packOf, type CatalogItem } from '../lean/match.ts';
 import type { Transcription, TranscribedRow } from '../lean/transcribe.ts';
 import { receptionRecord, RECEPTION_CONTRACT } from '../lean/reception.ts';
 
@@ -12,6 +12,59 @@ const catalog = [
   item({ id: 'coca', name: 'Refresco Coca Cola Sin Azúcar 2.5L', supplierSku: '2574', perPurchaseUnit: 8 }),
   item({ id: 'activia', name: 'Activia fresa 225g', supplier: 'Danone', supplierSku: '180174', barcodes: ['7501032398071'], purchaseUnit: 'Pieza', perPurchaseUnit: 1 }),
 ];
+
+describe('packs', () => {
+  it('reads what one Retool unit holds from the Masterview name', () => {
+    expect(packOf('Refresco Coca Cola Original 355ml (12-pack)')).toEqual({ n: 12, kind: 'pack' });
+    expect(packOf('Leche entera Alpura 1L (4 Pack)')).toEqual({ n: 4, kind: 'pack' });
+    expect(packOf('Jabón de barra azul Escudo 110g 3-pack')).toEqual({ n: 3, kind: 'pack' });
+    expect(packOf('Pack toallitas desinfectantes Clorox 30pz (4-pack)')).toEqual({ n: 4, kind: 'pack' });
+    expect(packOf('Huevo blanco San Juan caja 18pz')).toEqual({ n: 18, kind: 'contenido' });
+    expect(packOf('Flan vainilla LALA 100g / 6pz')).toEqual({ n: 6, kind: 'contenido' });
+    expect(packOf('Chocolates minis Snickers 8.5g (45pz)')).toEqual({ n: 45, kind: 'contenido' });
+    expect(packOf('Avena instantánea Granvita 8 sobres 35g c/u')).toEqual({ n: 8, kind: 'contenido' });
+    expect(packOf('Plátano chiapas racimo (5-7 pz)')).toBeNull();
+    expect(packOf('Bisquet Nūbe 1pz')).toBeNull();
+    expect(packOf('Refresco lata Coca Cola 355ml')).toBeNull();
+    expect(packOf('Bolsas de basura grandes Fácil Pack 20pz')).toEqual({ n: 20, kind: 'contenido' });
+  });
+
+  const packs = [
+    item({ id: 'zbz', name: 'Refresco Coca Cola Original 355ml (12-pack)', supplierSku: '1192', purchaseUnit: 'Pieza', perPurchaseUnit: 1 }),
+    item({ id: 'uth', name: 'Refresco original vidrio Coca Cola 235ml (12-pack)', supplierSku: '2442', purchaseUnit: 'Caja', perPurchaseUnit: 1 }),
+    item({ id: 'lata', name: 'Refresco lata Coca Cola 355ml', supplierSku: '1190', purchaseUnit: 'Pieza', perPurchaseUnit: 1 }),
+    item({ id: 'huevo', name: 'Huevo blanco San Juan caja 18pz', supplierSku: 'H18', purchaseUnit: 'Pieza', perPurchaseUnit: 1 }),
+    item({ id: 'flauta', name: 'Flautas de tinga de pollo Chonchi 600g (12pz)', supplierSku: 'FL1', purchaseUnit: 'Caja', perPurchaseUnit: 12 }),
+  ];
+  const arca = (code: string, q: [string, string]) => row({ codes: [{ header: 'DESCRIPCION', value: code }], quantities: q, unit: 'CAJAS' });
+
+  it('Arca "12 MPK": CAJAS 3 / PIEZAS 36 of a 12-pack is 3 for Retool, and asks a person', () => {
+    const r = match(doc(['CAJAS', 'PIEZAS'], [arca('1192', ['3.000', '36']), arca('2442', ['5.000', '60']), arca('1190', ['1.000', '24'])]), packs);
+    expect(r.proposals[0]).toMatchObject({ quantity: 3, status: 'review', quantityOk: true });
+    expect(r.proposals[0].reasons).toContain('paquete de 12: Retool cuenta 3 paquetes (36 piezas)');
+    expect(r.proposals[1]).toMatchObject({ quantity: 5, status: 'review' });
+    expect(r.proposals[2]).toMatchObject({ quantity: 24, status: 'ok' }); // single cans: supplier packs are ignored
+  });
+
+  it('a pieces-only number on a pack that could be either is unsure', () => {
+    const r = match(doc(['PIEZAS'], [row({ codes: [{ header: 'CLAVE', value: '1192' }], quantities: ['36'] })]), packs, new Map(), { mode: 'recepcion' });
+    expect(r.proposals[0]).toMatchObject({ quantity: 36, quantityOk: false, confident: true });
+    expect(r.proposals[0].reasons).toContain('paquete de 12: ¿36 paquetes o 3 paquetes (36 piezas)?');
+  });
+
+  it('contents items convert only on proof, with no question; the catalog factor wins when it explains the numbers', () => {
+    const r = match(doc(['CAJAS', 'PIEZAS'], [arca('H18', ['2', '36']), arca('FL1', ['1', '12'])]), packs);
+    expect(r.proposals[0]).toMatchObject({ quantity: 2, status: 'ok' });
+    expect(r.proposals[1]).toMatchObject({ quantity: 12, status: 'ok' });
+  });
+
+  it('the mh-recibo record says how Retool counts it', () => {
+    const t = doc(['CAJAS', 'PIEZAS'], [arca('1192', ['3.000', '36']), arca('1190', ['1.000', '24'])]);
+    const rec = receptionRecord(t, match(t, packs, new Map(), { mode: 'recepcion' }), packs);
+    expect(rec.rows[0]).toMatchObject({ piezas: 3, packKind: 'pack', packSize: 12, retoolUnit: 'paquete', piezasSueltas: 36, quantityOk: true, confident: true });
+    expect(rec.rows[1]).toMatchObject({ piezas: 24, packKind: null, retoolUnit: 'pieza', piezasSueltas: null });
+  });
+});
 
 describe('lean match', () => {
   it('uses the printed PIEZAS column and cross-checks cajas × catalog pieces', () => {
@@ -252,7 +305,7 @@ describe('lean match', () => {
         sourceRow: 1, sku: 'S', productName: 'Agua mineral Topo Chico 600ml', matchedBy: 'supplierSku', confident: true, piezas: 60, quantityOk: true,
         printedCodes: [topo, { header: 'CVEPROD', value: '50202310' }], printedDescription: 'AGUA MINERAL 600ML',
         printedQuantities: [{ header: 'CAJAS', value: '5' }, { header: 'PIEZAS', value: '60' }], printedUnit: null, candidates: [], notes: [],
-        matchKeys: ['1152', '7501055300000'],
+        matchKeys: ['1152', '7501055300000'], packKind: null, packSize: null, retoolUnit: 'pieza', piezasSueltas: null,
       });
       expect(rec.rows[1]).toMatchObject({ sourceRow: 2, sku: null, productName: null, matchedBy: null, confident: false, piezas: null, quantityOk: false });
       expect(rec.rows[1].candidates[0]).toEqual({ sku: 'S', name: 'Agua mineral Topo Chico 600ml', score: expect.any(Number), barcodes: ['7501055300000'], supplierSku: '1152' });

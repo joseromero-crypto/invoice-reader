@@ -120,6 +120,31 @@ const nameTokens = new WeakMap<CatalogItem, Set<string>[]>();
 const num = (s: string | null | undefined) => {
   if (s == null) return null; const m = String(s).replace(/,/g, '').match(/-?\d+(?:\.\d+)?/); return m ? parseFloat(m[0]) : null;
 };
+// What one Retool unit holds, read from the Masterview name. Retool counts the item, so a "(12-pack)" is 1 even
+// when a supplier prints the 12 cans (Arca: CAJAS 3, PIEZAS 36). Two kinds, because they are handled differently:
+//   pack      → the name says N-pack: a consumer pack of things sold on their own too (Coca Cola 355ml (12-pack)).
+//               Every row with one asks a person to confirm packs vs pieces.
+//   contenido → the name says Npz / N sobres / N rollos / caja Npz: what's inside one unit (huevo caja 18pz, flan
+//               6pz, Aspirina 40pz). Converted only when the invoice proves it (CAJAS × N = PIEZAS); no question.
+// N = 1 and ranges ("racimo (5-7 pz)") are not counts.
+export interface PackInfo { n: number; kind: 'pack' | 'contenido' }
+export function packOf(name: string | null | undefined): PackInfo | null {
+  const f = fold(name ?? '');
+  const pack = f.match(/(?<![\d.,-])(\d+)\s*-?\s*(?:pack|pk|mpk)\b/);
+  if (pack && +pack[1] > 1) return { n: +pack[1], kind: 'pack' };
+  const inside = f.match(/(?<![\d.,]|\d\s?-\s?)(\d+)\s*(?:pz|pzs|pza|pzas|piezas|sobres|rollos|latas|botellas|paquetes)\b/);
+  if (inside && +inside[1] > 1) return { n: +inside[1], kind: 'contenido' };
+  return null;
+}
+// The safety question for N-pack rows: what Retool gets, and what that is in loose pieces.
+export function packNote(item: CatalogItem | null, q: number | null, converted: boolean): { note: string; ok: boolean } | null {
+  const p = packOf(item?.name);
+  if (!p || p.kind !== 'pack' || q == null) return null;
+  if (converted || q % p.n !== 0 || q === 0) return { note: `paquete de ${p.n}: Retool cuenta ${q} paquete${q === 1 ? '' : 's'} (${q * p.n} piezas)`, ok: true };
+  // A pieces-only invoice can't tell 36 packs from 36 cans: a person decides.
+  return { note: `paquete de ${p.n}: ¿${q} paquetes o ${q / p.n} paquete${q / p.n === 1 ? '' : 's'} (${q} piezas)?`, ok: false };
+}
+
 const isPieceHeader = (h: string) => /PIEZ|PZA|\bPZS?\b|\bEA\b(?!.*CAJ)/i.test(h) && !/CAJ/i.test(h);
 const isCaseHeader = (h: string) => /CAJ|\bCJ\b|BULTO|\bCS\b/i.test(h);
 const pieceUnit = (u: string | null) => !!u && /^(PZ|PZA|PZAS|PIEZA|PIEZAS|PIEZA\(S\)|EA|H87|UNIDAD|UN|UND)$/i.test(u.trim());
@@ -144,7 +169,7 @@ function handwritten(row: TranscribedRow, printed: (number | null)[]): { vals: (
   return { vals: printed.map((v, i) => i === known[0] ? before + delta : v), note: `corregido a mano: impreso ${before}, marca ${row.handDelta}` };
 }
 
-export function quantity(row: TranscribedRow, cols: string[], item: CatalogItem | null, ignoreHand = false): { q: number | null; basis: string; ok: boolean; note?: string } {
+export function quantity(row: TranscribedRow, cols: string[], item: CatalogItem | null, ignoreHand = false): { q: number | null; basis: string; ok: boolean; note?: string; packs?: boolean } {
   const printed = cols.map((_, i) => num(row.quantities?.[i]));
   const hand = ignoreHand ? null : handwritten(row, printed);
   const q = fromColumns(row, cols, hand?.vals ?? printed, item);
@@ -152,13 +177,20 @@ export function quantity(row: TranscribedRow, cols: string[], item: CatalogItem 
   return hand ? { ...q, ok: false, note: q.note ? `${hand.note}; ${q.note}` : hand.note } : q;
 }
 
-function fromColumns(row: TranscribedRow, cols: string[], vals: (number | null)[], item: CatalogItem | null): { q: number | null; basis: string; ok: boolean; note?: string } {
+function fromColumns(row: TranscribedRow, cols: string[], vals: (number | null)[], item: CatalogItem | null): { q: number | null; basis: string; ok: boolean; note?: string; packs?: boolean } {
   const pi = cols.findIndex((h, i) => isPieceHeader(h) && vals[i] != null);
   const ci = cols.findIndex((h, i) => isCaseHeader(h) && vals[i] != null);
   const n = item?.perPurchaseUnit ?? null;
   const itemByCase = !!item && /caja/i.test(item.purchaseUnit);
   if (pi >= 0) {
     const pz = vals[pi]!;
+    // PIEZAS counts what's inside the Retool unit (Arca "12 MPK": CAJAS 3, PIEZAS 36 = 3 packs of 12). Only when the
+    // catalog's own factor doesn't already explain the numbers (Chonchi flautas (12pz) come Caja × 12 bags).
+    const pack = packOf(item?.name), cj = ci >= 0 ? vals[ci]! : null;
+    if (pack && cj != null && Math.abs(cj * pack.n - pz) < 1e-6 && !(itemByCase && n && Math.abs(cj * n - pz) < 1e-6) && (!n || n === 1)) {
+      const what = pack.kind === 'pack' ? `paquete${cj === 1 ? '' : 's'} de ${pack.n}` : `× ${pack.n} pz`;
+      return { q: cj, basis: `${cols[ci]} ${cj} = ${cj} ${what} (${cols[pi]} ${pz} son piezas sueltas)`, ok: true, packs: true };
+    }
     if (ci >= 0 && itemByCase && n && Math.abs(vals[ci]! * n - pz) > 1e-6)
       return { q: pz, basis: `${cols[pi]} ${pz}`, ok: false, note: `${cols[ci]} ${vals[ci]} × ${n} pz/caja = ${vals[ci]! * n}, pero ${cols[pi]} dice ${pz}` };
     return { q: pz, basis: ci >= 0 && n && itemByCase ? `${cols[pi]} ${pz} (= ${vals[ci]} cajas × ${n})` : `${cols[pi]} ${pz}`, ok: true };
@@ -333,8 +365,14 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
       : found === 'supplierSku' ? 'Clave de otro proveedor en Masterview'
       : away.length ? 'Solo en Masterview de otra ciudad' : 'No está en Masterview';
 
-    const q = quantity(row, cols, item, reception);
-    if (!q.ok) reasons.push(q.note ?? 'confirmar cantidad');
+    const q0 = quantity(row, cols, item, reception);
+    if (!q0.ok) reasons.push(q0.note ?? 'confirmar cantidad');
+    // N-pack products always carry the safety note: packs vs pieces is the mistake Retool can't catch (Arca 1 caja
+    // of 12 MPK confirmed as 12). In captura it sends the row to review; in recepcion it is a note, and the quantity
+    // is unsure only when the invoice can't tell packs from pieces.
+    const pk = q0.ok ? packNote(item, q0.q, !!q0.packs) : null;
+    if (pk) reasons.push(pk.note);
+    const q = pk && !pk.ok ? { ...q0, ok: false } : q0;
 
     let status: Proposal['status'];
     const quantityOk = q.ok && q.q != null;

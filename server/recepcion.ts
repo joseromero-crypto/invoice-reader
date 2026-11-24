@@ -102,9 +102,10 @@ export async function submit(request:Request,sessionId:string,documentId:string)
 }
 
 // Captura scans read before Nov 17 have no reception record: their rows are built here, like old reads.
-// A read is rebuilt when it's done and has no rows or rows without matchKeys (free: saved transcription + current catalog).
+// A read is rebuilt when it's done and has no rows or rows saved before matchKeys or packKind existed (free: saved
+// transcription + current catalog). Not written back.
 async function withMatchKeys(db:SupabaseClient,orgId:string,reads:any[]){
- const stale=reads.filter(r=>r.status==='done'&&(!r.rows.length||r.rows.some((row:any)=>!Array.isArray(row.matchKeys))));if(!stale.length)return reads;
+ const stale=reads.filter(r=>r.status==='done'&&(!r.rows.length||r.rows.some((row:any)=>!Array.isArray(row.matchKeys)||!('packKind' in row))));if(!stale.length)return reads;
  const jobs=check(await db.from('extraction_jobs').select('document_id,raw_result').eq('org_id',orgId).in('document_id',stale.map(r=>r.read_id)))!;
  const mappingsFor=new Map<string,any>();
  for(const read of stale){

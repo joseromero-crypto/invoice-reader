@@ -6,7 +6,7 @@
 // zeros from all-digit codes (normCode in lean/match.ts). mh-recibo links a row to an OC line when normCode(codigo) or
 // normCode(sku_marca) is in matchKeys. Fiscal codes (CVEPROD / Clave Prod. Serv. / 5xxxxxxx) are never in matchKeys.
 
-import { normCode, rowCodes, type CatalogItem, type MatchResult } from './match.ts';
+import { normCode, packOf, rowCodes, type CatalogItem, type MatchResult } from './match.ts';
 import type { Transcription } from './transcribe.ts';
 
 export const RECEPTION_CONTRACT = 1;
@@ -26,6 +26,12 @@ export interface ReceptionRow {
   candidates: { sku: string; name: string; score: number; barcodes: string[]; supplierSku: string | null }[];
   notes: string[];                                     // Spanish, one per reason
   matchKeys: string[];                                 // printed non-fiscal codes + the confident product's Masterview barcodes and SKU Proveedor, normalized
+  // How Retool counts the product (packOf in lean/match.ts, from the Masterview name). piezas is always in Retool units:
+  // a "(12-pack)" billed as CAJAS 3 / PIEZAS 36 is piezas 3, piezasSueltas 36. Null when no product is confident.
+  packKind: 'pack' | 'contenido' | null;               // pack: N-pack, mh-recibo asks packs vs pieces; contenido: Npz / caja 18pz, no question
+  packSize: number | null;                             // N units inside one Retool unit
+  retoolUnit: 'paquete' | 'pieza' | null;              // 'paquete' only for packKind 'pack'
+  piezasSueltas: number | null;                        // piezas × packSize, for the small note under the pack count
 }
 
 const codesOf = (it: CatalogItem | undefined) => ({
@@ -43,6 +49,7 @@ export function receptionRows(t: Transcription, result: MatchResult, catalog: Ca
     const sure = p.confident && !!p.item;
     const printed = rowCodes(p.row), own = sure ? codesOf(p.item!) : null;
     const matchKeys = [...new Set([...printed.keys, ...printed.barcodes, ...(own?.barcodes ?? []), ...(own?.supplierSku ? [own.supplierSku] : [])])];
+    const pack = sure ? packOf(p.item!.name) : null;
     return {
       sourceRow: i + 1,
       sku: sure ? p.item!.sku : null,
@@ -58,6 +65,10 @@ export function receptionRows(t: Transcription, result: MatchResult, catalog: Ca
       candidates: p.candidates.map(c => ({ sku: c.sku, name: c.name, score: Math.round(c.score * 100) / 100, ...codesOf(itemOf(c.id, c.otherCity)) })),
       notes: [...p.reasons],
       matchKeys,
+      packKind: pack?.kind ?? null,
+      packSize: pack?.n ?? null,
+      retoolUnit: !sure ? null : pack?.kind === 'pack' ? 'paquete' : 'pieza',
+      piezasSueltas: pack && p.quantity != null ? p.quantity * pack.n : null,
     };
   });
 }

@@ -1,6 +1,6 @@
 import {useState} from 'react';
 import {Check,ChevronDown,Plus,Search,TriangleAlert,X} from 'lucide-react';
-import {quantity,type CatalogItem} from '../lean/match';
+import {packOf,quantity,type CatalogItem} from '../lean/match';
 import type {TranscribedRow} from '../lean/transcribe';
 import type {Document,Product,Row} from '../shared/domain';
 export type Confirmation={row:Row;product:Product;quantity:number};
@@ -11,6 +11,9 @@ const validPieces=(s:string)=>/^\d+$/.test(s.trim())&&Number(s)<=1000000;
 const transcribed=(r:Row)=>Array.isArray(r.sourceDetails?.codes)?r.sourceDetails as unknown as TranscribedRow:null;
 // Same rules as lean/match.ts: a different product can change cajas × piezas por caja.
 function piecesFor(r:Row,product:Product|null){const t=transcribed(r);if(!t||!r.columns)return null;return quantity(t,r.columns,product&&toItem(product)).q;}
+// An N-pack counts as one in Retool: say it next to the number, with the loose pieces muted.
+function PackHint({product,pieces}:{product:Product|null;pieces:string}){const p=packOf(product?.name);if(!p||p.kind!=='pack')return null;const q=/^\d+$/.test(pieces.trim())?Number(pieces):null;
+ return <small className="lean-pack">{q===null?`Retool cuenta paquetes de ${p.n}`:<><strong>{q} paquete{q===1?'':'s'}</strong> · {q*p.n} piezas</>}</small>;}
 const fold=(s:string)=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 const City=({p}:{p:Product})=><>{p.otherCity&&<span className="c-tag c-tag--ink lean-city">Otra ciudad ({p.otherCity})</span>}{p.purchasingOff&&<span className="c-tag c-tag--ink lean-city">Compras deshabilitadas</span>}</>;
 function ProductPicker({value,candidates,products,disabled,onChange,big=false}:{value:Product|null;candidates:Product[];products:Product[];disabled:boolean;onChange:(p:Product)=>void;big?:boolean}){
@@ -32,7 +35,8 @@ function LeanRow({row,draft,setDraft,products,disabled,onConfirm}:{row:Row;draft
  return <li className={`lean-item ${status}${row.confirmed?' confirmed':''}`}>
  <div className="lean-main">{row.confirmed?<strong className="lean-name">{row.product?.name}</strong>:<ProductPicker big value={draft.product} candidates={row.candidates} products={products} disabled={disabled} onChange={p=>{const q=piecesFor(row,p);setDraft({product:p,pieces:q!==null&&Number.isInteger(q)?String(q):draft.pieces});}}/>}
  <small className="lean-hint" title={hint}>{hint}{!row.confirmed&&/×/.test(row.conversion)?` · ${row.conversion}`:''}</small>
- {!row.confirmed&&status!=='ok'&&reasons.length>0&&<small className="lean-reasons">{reasons.join(' · ')}</small>}</div>
+ {!row.confirmed&&status!=='ok'&&reasons.length>0&&<small className="lean-reasons">{reasons.join(' · ')}</small>}
+ <PackHint product={row.confirmed?row.product:draft.product} pieces={row.confirmed?String(row.confirmedQuantity??''):draft.pieces}/></div>
  {row.confirmed?<strong className="lean-qty">{row.confirmedQuantity}</strong>:<input className="lean-pieces" aria-label="Piezas" inputMode="numeric" disabled={disabled} value={draft.pieces} placeholder="?" onChange={e=>setDraft({...draft,pieces:e.target.value})}/>}
  {row.confirmed?<span className="lean-done" aria-label="Confirmado"><Check size={18}/></span>:<button className={status==='ok'?'lean-tick':'lean-tick lean-confirm'} aria-label="Confirmar" title="Confirmar" disabled={disabled||!draft.product||!validPieces(draft.pieces)} onClick={onConfirm}><Check size={18}/></button>}</li>;
 }

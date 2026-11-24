@@ -185,6 +185,8 @@ td small{display:block;font-size:var(--fs-sm);color:var(--c-muted)}
 .lean-list>li:has(.lean-picker-menu)>.lean-pieces{grid-column:2}
 .lean-name{font-size:17px;font-weight:700;letter-spacing:-.01em;line-height:1.3}
 .lean-hint{font-size:var(--fs-xs);color:var(--c-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lean-pack{font-size:var(--fs-sm);color:var(--c-muted)}
+.lean-pack strong{color:var(--c-ink)}
 .lean-reasons{align-self:flex-start;margin-top:4px;padding:3px 10px;border-radius:var(--r-pill);background:var(--c-ink);color:var(--c-white);font-size:12px;font-weight:700}
 .lean-item.excluded .lean-name,.lean-item.excluded .lean-picked strong{text-decoration:line-through;color:var(--c-muted)}
 .lean-item.confirmed{background:var(--c-white);border:1.5px solid var(--c-line)}
