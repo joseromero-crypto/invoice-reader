@@ -6,21 +6,23 @@ import background from '../netlify/functions/catalog-background';
 import {cityStatus} from '../shared/masterview';
 import {publishMasterview,runJob,type MvJob} from '../server/masterview';
 const header='id,sku,Item,city,Código de Barras,Image URL,Proveedor';
-function fakeDB({csv=`${header}\n1,A,Uno,Monterrey,111,https://i/a,P`,fail=''}={}){
- const writes:string[]=[],removed:string[]=[],rpc:any[]=[],objects=new Map<string,string>([['masterview/monterrey/incoming-x.csv',csv]]);
+function fakeDB({csv=`${header}\n1,A,Uno,Monterrey,111,https://i/a,P`,fail='',failTimes=Infinity,code='',saves=false,failUploads=0}={}){
+ let saved:any=null;const writes:string[]=[],removed:string[]=[],rpc:any[]=[],objects=new Map<string,string>([['masterview/monterrey/incoming-x.csv',csv]]);
  const db:any={writes,removed,rpc:async(name:string,args:any)=>{rpc.push(name);
-  if(name===fail)return {data:null,error:{message:'boom'}};
+  if(name==='import_mv'){if(name!==fail||saves)saved={id:'v',uploaded_at:'2026-11-05T00:00:00Z',source_hash:args.p_hash,report:args.p_report};}
+  if(name===fail&&(name!=='read_mv_state'||rpc.includes('import_mv'))&&failTimes-->0)return {data:null,error:{message:'boom',code}};
   if(name==='read_mv_state')return {data:{version:null,products:rpc.includes('import_mv')?[{sku:'A',name:'Uno',barcode:'111',image_url:'https://i/a',raw:{}}]:[],cities:rpc.includes('import_mv')?[{sku:'A',city:'Monterrey',name:'Uno',bc:'111',import_id:'v'}]:[],imports:[{id:'v',uploaded_at:'2026-11-05T00:00:00Z'}],...(rpc.includes('import_mv')?{version:'v'}:{})},error:null};
   if(name==='import_mv')return {data:{version:'v',uploadedAt:'2026-11-05T00:00:00Z'},error:null};
   if(name==='mv_city_status')return {data:[],error:null};return {data:null,error:null};},
- from:()=>{const chain:any={};for(const m of ['select','order','limit'])chain[m]=()=>chain;chain.maybeSingle=async()=>({data:null,error:null});chain.then=(y:any,n:any)=>Promise.resolve({data:[{name:'MH Contry',city:'Monterrey',active:true}],error:null}).then(y,n);return chain;},
+ from:()=>{const chain:any={};for(const m of ['select','order','limit'])chain[m]=()=>chain;chain.maybeSingle=async()=>({data:saved,error:null});chain.then=(y:any,n:any)=>Promise.resolve({data:[{name:'MH Contry',city:'Monterrey',active:true}],error:null}).then(y,n);return chain;},
  storage:{from:(bucket:string)=>({
   download:async(path:string)=>objects.has(path)?{data:new Blob([objects.get(path)!]),error:null}:{data:null,error:{message:'not found'}},
-  upload:async(path:string,body:any)=>{writes.push(`${bucket}/${path}`);objects.set(path,body instanceof Blob?await body.text():new TextDecoder().decode(body));return {data:{},error:null};},
+  upload:async(path:string,body:any)=>{if(path==='latest.json'&&failUploads-->0)return {data:null,error:{message:'boom'}};writes.push(`${bucket}/${path}`);objects.set(path,body instanceof Blob?await body.text():new TextDecoder().decode(body));return {data:{},error:null};},
   remove:async(paths:string[])=>{removed.push(...paths);return {data:[],error:null};},
   createSignedUploadUrl:async(path:string)=>({data:{token:`token-${path}`},error:null})})}};
  return db;
 }
+const noWait=async()=>{};
 const post=(body:unknown)=>new Request('http://local/api/catalog',{method:'POST',body:JSON.stringify(body)});
 const job:MvJob={id:'11111111-1111-4111-8111-111111111111',state:'running',startedAt:new Date().toISOString()};
 const lastJob=async(db:any)=>JSON.parse(await (await db.storage.from('catalogs').download('masterview/job.json')).data.text());
@@ -36,20 +38,20 @@ it('accepts only paths under catalogs/masterview',async()=>{
  expect(response.status).toBe(400);expect(state.db.writes).toEqual([]);
 });
 it('imports, moves the file to latest.csv, then publishes latest.json before version.txt',async()=>{
- await runJob(state.db,'user',job,{paths:['masterview/monterrey/incoming-x.csv']});
+ await runJob(state.db,'user',job,{paths:['masterview/monterrey/incoming-x.csv']},noWait);
  expect(state.db.writes.filter((w:string)=>!w.endsWith('job.json'))).toEqual(['catalogs/masterview/monterrey/latest.csv','masterview/latest.json','masterview/version.txt']);
  expect(state.db.removed).toEqual(['masterview/monterrey/incoming-x.csv']);
  expect(await lastJob(state.db)).toMatchObject({state:'done',version:'v',published:true});
 });
 it('a rejected file writes nothing but the job result, and latest.csv stays',async()=>{
  state.db=fakeDB({csv:`id,sku,Item,city,Proveedor\n1,A,Uno,CDMX,P`});
- await runJob(state.db,'user',job,{paths:['masterview/monterrey/incoming-x.csv']});
+ await runJob(state.db,'user',job,{paths:['masterview/monterrey/incoming-x.csv']},noWait);
  expect(state.db.writes).toEqual(['catalogs/masterview/job.json']);
  const result=await lastJob(state.db);expect(result.state).toBe('failed');expect(result.error).toMatch(/El archivo de CDMX: Falta Image URL \/ Código de Barras/);
 });
 it('a failed database write publishes nothing',async()=>{
  state.db=fakeDB({fail:'import_mv'});
- await runJob(state.db,'user',job,{paths:['masterview/monterrey/incoming-x.csv']});
+ await runJob(state.db,'user',job,{paths:['masterview/monterrey/incoming-x.csv']},noWait);
  expect(state.db.writes).toEqual(['catalogs/masterview/job.json']);expect((await lastJob(state.db)).state).toBe('failed');
 });
 it('never publishes an empty Masterview',async()=>{await expect(publishMasterview(state.db)).rejects.toThrow(/no tiene importaciones/);expect(state.db.writes).toEqual([]);});
@@ -62,4 +64,21 @@ it('city counts come from the import reports: newest rows, date of the last impo
  const c=(rows:number,replaced:boolean)=>({rows,replaced,exclusives:0,missingVsMonterrey:0});
  expect(cityStatus([{uploaded_at:'3',cities:{Monterrey:c(9,true),CDMX:c(5,false)}},{uploaded_at:'2',cities:{Monterrey:c(8,true),CDMX:c(5,true)}}])).toEqual([{city:'Monterrey',rows:9,updated_at:'3'},{city:'CDMX',rows:5,updated_at:'2'}]);
  expect(cityStatus([])).toEqual([]);
+});
+it('a database that is busy after the save only delays the publish',async()=>{
+ state.db=fakeDB({fail:'read_mv_state',failTimes:3,failUploads:2});
+ await runJob(state.db,'user',job,{paths:['masterview/monterrey/incoming-x.csv']},noWait);
+ expect(state.db.writes).toContain('masterview/version.txt');expect(await lastJob(state.db)).toMatchObject({state:'done',published:true});
+});
+it('a save whose answer was lost counts as saved, and is not written twice',async()=>{
+ state.db=fakeDB({fail:'import_mv',saves:true});
+ await runJob(state.db,'user',job,{paths:['masterview/monterrey/incoming-x.csv']},noWait);
+ expect(await lastJob(state.db)).toMatchObject({state:'done',published:true});
+});
+it('a publish that never succeeds says the catalog was saved, and "publish" finishes it',async()=>{
+ state.db=fakeDB({failUploads:7});
+ await runJob(state.db,'user',job,{paths:['masterview/monterrey/incoming-x.csv']},noWait);
+ expect(await lastJob(state.db)).toMatchObject({state:'failed',committed:true});
+ await runJob(state.db,'user',job,{paths:[]},noWait);
+ expect(await lastJob(state.db)).toMatchObject({state:'done',published:true});
 });

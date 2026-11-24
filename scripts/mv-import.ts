@@ -4,7 +4,7 @@
 // prints what doesn't map. Never touches the masterview bucket: publishing happens in the admin screen.
 import fs from 'node:fs';
 import {adminClient,check} from '../server/auth';
-import {importMasterview} from '../server/masterview';
+import {importMasterview,moveFiles} from '../server/masterview';
 import {citySlug,parseMasterviewFile} from '../shared/catalog';
 const argv=process.argv.slice(2),outAt=argv.indexOf('--out'),out=outAt>=0?argv.splice(outAt,2)[1]:null,confirmDrop=argv.includes('--confirm-drop');
 const files=argv.filter(a=>!a.startsWith('--'));if(!files.length)throw Error('Usage: mv-import.ts <city.csv>... [--confirm-drop] [--out report.json]');
@@ -18,7 +18,7 @@ for(const file of files){
 }
 const uploaded=Date.now();
 try{
- const result=await importMasterview(db,actor,{paths,confirmDrop});const imported=Date.now();
+ const result=await importMasterview(db,actor,{paths,confirmDrop});await moveFiles(db);const imported=Date.now();
  const remap=check(await db.rpc('mv_remap_learned'));
  const {report}=result;
  console.log(JSON.stringify({version:result.version,uploadedAt:result.uploadedAt,seconds:{upload:(uploaded-started)/1000,import:(imported-uploaded)/1000},cities:report.cities,added:report.added,updated:report.updated,unchanged:report.unchanged,retired:report.retired.length,nameVariants:report.nameVariants.length,barcodeConflicts:report.barcodeConflicts.length,warnings:report.warnings,remap},null,1));

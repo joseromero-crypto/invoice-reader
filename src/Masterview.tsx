@@ -5,7 +5,7 @@ import type {MvReport} from '../shared/masterview';
 import {api,SESSION_EXPIRED,supabase} from './lib/supabase';
 import UnmatchedReport from './UnmatchedReport';
 type CityStatus={city:string;rows:number;updated_at:string};
-type Job={id:string;state:'running'|'done'|'failed';error?:string};
+type Job={id:string;state:'running'|'done'|'failed';error?:string;committed?:boolean;unsure?:boolean};
 type Status={cities:CityStatus[];last:{id:string;uploaded_at:string;uploaded_by:string|null;report:MvReport&{files?:{city:string;rows:number}[]}}|null;job:Job|null};
 type Picked={key:string;file:File;city:string|null;rows:number;errors:string[];warnings:string[]};
 const POLL_MS=3000,POLL_LIMIT=15*60000,DROP_LIMIT=0.9;
@@ -33,7 +33,7 @@ export default function Masterview({onClose}:{onClose:()=>void}){
    if(!active)return;
    if(!job||job.state==='running'){if(Date.now()-started<POLL_LIMIT)continue;setRunning(false);setBusy(false);setError('No se pudo confirmar el resultado. Recarga la página y revisa "Última actualización" antes de subir otra vez.');return;}
    const ours=job.id===waiting.current;
-   if(ours&&job.state==='failed'){setUnchanged(true);setError(job.error??'La importación falló; no se cambió el catálogo.');}
+   if(ours&&job.state==='failed'){setUnchanged(!job.committed&&!job.unsure);if(job.committed)setPicked([]);setError(job.error??'La importación falló; no se cambió el catálogo.');}
    else if(ours){setPicked([]);setConfirmDrop(false);setDone('Masterview actualizado y publicado para las otras apps.');}
    else setError('Otra importación empezó después de esta. Revisa "Última actualización".');
    setBusy(false);await refresh().catch(()=>{});if(active)setRunning(false);return;
@@ -52,6 +52,7 @@ export default function Masterview({onClose}:{onClose:()=>void}){
   await Promise.all(uploads.map(async u=>{const file=picked.find(p=>p.city===u.city)!.file;const sent=await supabase!.storage.from('catalogs').uploadToSignedUrl(u.path,u.token,file,{contentType:'text/csv'});if(sent.error)throw sent.error;}));
   return api('catalog',{action:'start',paths:uploads.map(u=>u.path),confirmDrop});});
  const reread=()=>start(()=>api('catalog',{action:'reread',confirmDrop:false}));
+ const publish=()=>start(()=>api('catalog',{action:'publish'}));
  const report=status?.last?.report;
  return <section className="masterview" aria-label="Masterview">
   <button className="text-button masterview-back" onClick={onClose}><ArrowLeft size={16}/> Volver</button>
@@ -65,6 +66,7 @@ export default function Masterview({onClose}:{onClose:()=>void}){
    {picked.length>0&&<button className="primary wide" disabled={busy||!valid} onClick={upload}>{busy?<LoaderCircle size={17} className="spin"/>:<Upload size={17}/>} {running?'Importando…':'Subir'}</button>}
    {running&&<p className="catalog-help" role="status">Importando. Tarda alrededor de un minuto; puedes dejar esta página abierta.</p>}
    {error&&<div className="catalog-errors" role="alert"><strong><TriangleAlert size={15}/> {keptCatalog?'No se cambió el catálogo.':'Hubo un problema.'}</strong><p>{error}</p></div>}
+   {!running&&status?.job?.state==='failed'&&(status.job.committed||status.job.unsure)&&<button className="secondary" disabled={busy} onClick={publish}><RefreshCw size={16}/> Terminar de publicar</button>}
    {done&&<p className="catalog-help" role="status">{done}</p>}
   </div>
   <div className="masterview-card">

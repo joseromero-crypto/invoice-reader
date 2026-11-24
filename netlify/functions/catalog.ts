@@ -12,6 +12,7 @@ const Input=z.discriminatedUnion('action',[
  z.object({action:z.literal('unmatched')}),
  z.object({action:z.literal('prepare'),cities:z.array(z.string().trim().min(1).max(80)).min(1).max(8)}),
  z.object({action:z.literal('start'),paths:z.array(z.string().max(200)).min(1).max(8),confirmDrop:z.boolean()}),
+ z.object({action:z.literal('publish')}),
  z.object({action:z.literal('reread'),confirmDrop:z.boolean()})]);
 export default async function handler(request:Request){try{
  if(request.method!=='POST')throw new HttpError(405,'POST required');
@@ -35,11 +36,11 @@ export default async function handler(request:Request){try{
  return Response.json({uploads});
  }
  await running();
- const paths=b.action==='reread'?(await cities()).map(c=>latestCsv(c.city)):b.paths;
- if(!paths.length)throw new HttpError(409,'Todavía no hay archivos guardados.');
+ const paths=b.action==='publish'?[]:b.action==='reread'?(await cities()).map(c=>latestCsv(c.city)):b.paths;
+ if(!paths.length&&b.action!=='publish')throw new HttpError(409,'Todavía no hay archivos guardados.');
  if(paths.some(p=>!/^masterview\/[a-z0-9-]+\/(latest|incoming-[a-f0-9-]{36})\.csv$/.test(p)))throw new HttpError(400,'Referencia de archivo inválida.');
  const job={id:randomUUID(),state:'running' as const,startedAt:new Date().toISOString()};await writeJob(db,job);
- const dispatched=await fetch(new URL('/.netlify/functions/catalog-background',request.url),{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({jobId:job.id,paths,confirmDrop:b.confirmDrop})});
+ const dispatched=await fetch(new URL('/.netlify/functions/catalog-background',request.url),{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({jobId:job.id,paths,confirmDrop:b.action!=='publish'&&b.confirmDrop})});
  if(!dispatched.ok){await writeJob(db,{...job,state:'failed',error:'No se pudo iniciar la importación.'});throw new HttpError(503,'No se pudo iniciar la importación.');}
  return Response.json({job},{status:202});
  }catch(e){return failure(e);}}
