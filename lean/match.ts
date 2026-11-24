@@ -396,17 +396,35 @@ export function match(t: Transcription, catalog: CatalogItem[], mappings: Mappin
   // Free sanity check: printed quantity totals vs the sum of each quantity column.
   const warnings: string[] = [];
   let totalsOk: boolean | null = null;
+  // "TotalCantidad (photo 2)": the model says which photo the total is on (Qualtia RK 262247 / 262246, Nov 24).
+  const onPhoto = (label: string) => { const m = label.match(/\(?\s*(?:photo|foto)\s*(\d+)\s*\)?/i); return m ? +m[1] : null; };
+  const baseLabel = (label: string) => label.replace(/\(?\s*(?:photo|foto)\s*\d+\s*\)?/i, '').trim().toUpperCase();
+  // "307 97.29": one total per quantity column, printed on one line (PIEZAS, KILOS). The k-th number belongs to column k.
+  const numbers = (value: string) => { const p = value.trim().split(/\s+/); return p.length > 1 && p.length === cols.length && p.every(x => /^\d[\d,]*(?:\.\d+)?$/.test(x)) ? p.map(x => num(x)!) : null; };
+  const sumsOf = (rs: TranscribedRow[]) => cols.map((_, i) => rs.reduce((a, r) => a + (num(r.quantities?.[i]) ?? 0), 0));
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
   for (const t0 of t.printedTotals ?? []) {
     const v = num(t0.value); if (v == null || /KILO|\bKG|PESO|LITRO|IMPORTE|\$/i.test(t0.label)) continue;
+    const photo = onPhoto(t0.label), ownRows = photo == null ? [] : rows.filter(r => r.photo === photo);
     if (/RENGL|PARTIDAS|LINEAS/i.test(t0.label)) {
-      if (v !== rows.length) { totalsOk = false; warnings.push(`La factura dice ${v} renglones y se leyeron ${rows.length}.`); } else totalsOk = totalsOk ?? true;
+      if (v !== rows.length && !(photo != null && v === ownRows.length)) { totalsOk = false; warnings.push(`La factura dice ${v} renglones y se leyeron ${rows.length}.`); } else totalsOk = totalsOk ?? true;
       continue;
     }
-    const sums = cols.map((_, i) => rows.reduce((a, r) => a + (num(r.quantities?.[i]) ?? 0), 0));
+    const sums = sumsOf(rows);
     // Two invoices in one upload each print their own total under the same label: together they must equal the rows.
-    const sameLabel = (t.printedTotals ?? []).filter(x => x.label.trim().toUpperCase() === t0.label.trim().toUpperCase());
-    const together = sameLabel.length > 1 ? sameLabel.reduce((a, x) => a + (num(x.value) ?? 0), 0) : v;
-    const okHere = sums.some(x => Math.abs(x - v) < 1e-6 || Math.abs(x - together) < 1e-6);
+    const sameLabel = (t.printedTotals ?? []).filter(x => baseLabel(x.label) === baseLabel(t0.label));
+    // A total that says its photo must equal that photo's rows, or the whole invoice (a total on the last page).
+    const check = (value: number, k: number | null, totals: number[]) => {
+      const together = totals.length > 1 ? totals.reduce((a, x) => a + x, 0) : value;
+      const pick = (s: number[]) => k == null ? s : [s[k]];
+      return pick(sums).some(x => near(x, value) || near(x, together)) || (ownRows.length > 0 && pick(sumsOf(ownRows)).some(x => near(x, value)));
+    };
+    const many = numbers(t0.value);
+    // A column nobody filled on the rows (KILOS of dashes) can't be checked; at least one column has to be.
+    const filled = many ? many.map((_, k) => k).filter(k => rows.some(r => num(r.quantities?.[k]) != null)) : [];
+    const okHere = filled.length
+      ? filled.every(k => check(many![k], k, sameLabel.map(x => numbers(x.value)?.[k] ?? 0)))
+      : check(v, null, sameLabel.map(x => num(x.value) ?? 0));
     // Some invoices total a different unit than any column (e.g. TotalPiezas on a cajas-only table): only
     // count a mismatch when the label names a unit we can compare.
     const comparable = sums.length > 0 && (/PIEZ|PZA|CAJ|CANT|UNID/i.test(t0.label));

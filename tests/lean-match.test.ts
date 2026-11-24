@@ -302,7 +302,7 @@ describe('lean match', () => {
       const rec = receptionRecord(t, match(t, catalog, new Map(), recepcion), catalog);
       expect(rec.contract).toBe(RECEPTION_CONTRACT);
       expect(rec.rows[0]).toEqual({
-        sourceRow: 1, sku: 'S', productName: 'Agua mineral Topo Chico 600ml', matchedBy: 'supplierSku', confident: true, piezas: 60, quantityOk: true,
+        sourceRow: 1, photo: 1, sku: 'S', productName: 'Agua mineral Topo Chico 600ml', matchedBy: 'supplierSku', confident: true, piezas: 60, quantityOk: true,
         printedCodes: [topo, { header: 'CVEPROD', value: '50202310' }], printedDescription: 'AGUA MINERAL 600ML',
         printedQuantities: [{ header: 'CAJAS', value: '5' }, { header: 'PIEZAS', value: '60' }], printedUnit: null, candidates: [], notes: [],
         matchKeys: ['1152', '7501055300000'], packKind: null, packSize: null, retoolUnit: 'pieza', piezasSueltas: null,

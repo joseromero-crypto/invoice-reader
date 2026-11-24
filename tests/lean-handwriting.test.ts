@@ -154,6 +154,15 @@ describe('two invoices in one upload', () => {
     expect(r.proposals.map(p => p.status)).toEqual(['review', 'review']);
   });
 
+  it('"(photo N)" labels and one total per column on one line (Qualtia RK 262247 / 262246)', () => {
+    const two = [row({ photo: 1, quantities: ['48', null] }), row({ photo: 1, quantities: ['30', null] }), row({ photo: 2, quantities: ['30', null] })];
+    const cols = ['PIEZAS', 'KILOS'];
+    const run = (a: string, b: string) => match(doc(two, cols, [total('TotalCantidad (photo 1)', a), total('TotalCantidad (photo 2)', b)]), catalog);
+    expect(run('78 97.29', '30 32.10')).toMatchObject({ totalsOk: true, warnings: [] });
+    expect(run('78 97.29', '31 32.10').totalsOk).toBe(false); // a misread row on one photo
+    expect(run('79 97.29', '30 32.10').totalsOk).toBe(false);
+  });
+
   it('totals with different labels are never added together', () => {
     expect(match(doc(rows, ['CANT.'], [total('TOTAL PIEZAS', '214'), total('TOTAL CAJAS', '14')]), catalog).totalsOk).toBe(false);
   });

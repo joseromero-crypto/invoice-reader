@@ -13,6 +13,7 @@ export const RECEPTION_CONTRACT = 1;
 
 export interface ReceptionRow {
   sourceRow: number;                                   // 1-based printed order
+  photo: number | null;                                // 1-based photo the row was read from: two invoices in one upload can be told apart
   sku: string | null;                                  // Calii SKU, only when confident
   productName: string | null;                          // Masterview Item in the hub's city, only when confident
   matchedBy: 'barcode' | 'supplierSku' | null;
@@ -52,6 +53,7 @@ export function receptionRows(t: Transcription, result: MatchResult, catalog: Ca
     const pack = sure ? packOf(p.item!.name) : null;
     return {
       sourceRow: i + 1,
+      photo: p.row.photo ?? null,
       sku: sure ? p.item!.sku : null,
       productName: sure ? p.item!.name : null,
       matchedBy: sure && (p.matchedBy === 'barcode' || p.matchedBy === 'supplierSku') ? p.matchedBy : null,
