@@ -68,7 +68,7 @@ export function cityStatus(imports:{uploaded_at:string;cities:MvReport['cities']
 // Arguments for the import_mv RPC. The city barcode is stored only when it differs from the product's; the RPC recomputes that.
 export const importPayload=(plan:ReturnType<typeof planImport>)=>({p_cities:plan.cities,p_products:plan.products.map(({id:_,...p})=>p),p_rows:plan.rows.map(({city,row})=>({sku:row.sku,city,retool_id:row.retoolId,name:row.name,proveedor:row.proveedor,sku_proveedor:row.skuProveedor,unidad_compra:row.unidadCompra,piezas_por_unidad:row.piezasPorUnidad,deshabilitar_compras:row.deshabilitarCompras,tiers:row.tiers,raw:row.cityRaw}))});
 // masterview/latest.json for the static apps: barcode entries are objects, name entries plain strings (what Sorting Hub reads today).
-export function buildLatest(state:MvState,hubs:{name:string;city:string|null;active:boolean}[]){
+export function buildLatest(state:MvState,hubs:{name:string;city:string|null;active:boolean}[],cityTimes?:Record<string,string>){
  const products=new Map(state.products.filter(p=>!p.raw.retired_at).map(p=>[p.sku,p]));
  const rows=state.cities.filter(c=>products.has(c.sku)).sort(byCity);
  const sold=new Map<string,string[]>();for(const r of rows)sold.set(r.sku,[...(sold.get(r.sku)??[]),r.city]);
@@ -85,5 +85,5 @@ export function buildLatest(state:MvState,hubs:{name:string;city:string|null;act
  const uploadedAt=new Map((state.imports??[]).map(i=>[i.id,i.uploaded_at])),cityUpdatedAt:Record<string,string>={};
  for(const r of rows){const at=uploadedAt.get(r.import_id??'');if(at&&(!cityUpdatedAt[r.city]||at>cityUpdatedAt[r.city]))cityUpdatedAt[r.city]=at;}
  const updatedAt=(state.imports??[]).find(i=>i.id===state.version)?.uploaded_at??null;
- return {updatedAt,version:state.version,count:products.size,cities:[...new Set(rows.map(r=>r.city))],cityUpdatedAt,hubCities:Object.fromEntries(hubs.filter(h=>h.active&&h.city).map(h=>[citySlug(h.name),h.city])),map,alt};
+ return {updatedAt,version:state.version,count:products.size,cities:[...new Set(rows.map(r=>r.city))],cityUpdatedAt:{...cityUpdatedAt,...cityTimes},hubCities:Object.fromEntries(hubs.filter(h=>h.active&&h.city).map(h=>[citySlug(h.name),h.city])),map,alt};
 }

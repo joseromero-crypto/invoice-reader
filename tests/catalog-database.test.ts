@@ -131,3 +131,20 @@ it('saves each city file\'s Tiers as text, overwrites it on re-upload, and leave
  expect((await tiers())['AAA/Monterrey']).toBeNull();
  expect((await db.query<any>(`select raw from mv_product_city where sku='AAA' and city='Monterrey'`)).rows[0].raw.Tiers).toBeUndefined();
 });
+it('writes only new or changed city rows, keeps barcodes right, and the city still shows the new date',async()=>{
+ await db.exec(fs.readFileSync('supabase/migrations/20261124120000_import_mv_changed_rows.sql','utf8'));
+ const row=(r:string[])=>file('Monterrey',r),a='101,AAA,Tomate huaje,Monterrey,750111,https://img/a,LALA,21541,Caja,12,pz',b='102,BBB,Queso,Monterrey,750222,https://img/b,Sigma,,,,pz';
+ const c=()=>file('CDMX',['901,AAA,Jitomate saladet,CDMX,750111,https://img/a,Otro,5,Caja,6,pz']);
+ const rows=async()=>Object.fromEntries((await db.query<any>(`select sku||'/'||city k,ctid::text t,import_id i,barcode b,unidad_compra u from mv_product_city`)).rows.map(r=>[r.k,r]));
+ await write(admin,[row([a,b]),c()],'lean-1');const before=await rows();
+ const run=await write(admin,[row([a.replace('Caja','Bolsa'),b]),c()],'lean-2');const after=await rows();
+ expect(after['AAA/Monterrey']).toMatchObject({u:'Bolsa',i:run.version});
+ for(const k of ['BBB/Monterrey','AAA/CDMX'])expect(after[k]).toEqual(before[k]);
+ const status=(await db.query<any>('select * from mv_city_status()')).rows;
+ const at=(await db.query<any>('select uploaded_at from mv_imports where id=$1',[run.version])).rows[0].uploaded_at;
+ for(const s of status)expect(s.updated_at).toEqual(at);
+ // The base barcode changes in Monterrey: CDMX's own row is untouched by the file, but its barcode now differs.
+ await write(admin,[row([a.replace('750111','750999'),b]),c()],'lean-3');
+ expect((await rows())['AAA/CDMX'].b).toBe('750111');
+ await write(admin,[row([b]),c()],'lean-4');expect((await rows())['AAA/Monterrey']).toBeUndefined();
+});

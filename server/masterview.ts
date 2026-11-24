@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {check,HttpError} from './auth';
 import {MV_CITY_COLUMNS,MV_PRODUCT_COLUMNS,citySlug,parseMasterviewFile} from '../shared/catalog.ts';
-import {buildLatest,importPayload,planImport,type MvState} from '../shared/masterview.ts';
+import {buildLatest,cityStatus,importPayload,planImport,type MvState} from '../shared/masterview.ts';
 const MAX_FILE=15000000;
 export const latestCsv=(city:string)=>`masterview/${citySlug(city)}/latest.csv`;
 const UNSURE='No se pudo confirmar si se guardó. Espera un minuto, recarga y revisa "Última actualización" antes de subir otra vez.';
@@ -53,10 +53,11 @@ export const moveFiles=(db:SupabaseClient,wait=sleep)=>patient(async()=>{
    check(await bucket.upload(target,await data.arrayBuffer(),{contentType:'text/csv',upsert:true}));check(await bucket.remove([f.path]));}
 },wait);
 export async function finishImport(db:SupabaseClient,wait=sleep){await moveFiles(db,wait);return patient(()=>publishMasterview(db),wait);}
+export async function readImports(db:SupabaseClient){return check(await db.from('mv_imports').select('uploaded_at,cities:report->cities').order('uploaded_at',{ascending:false})) as any as Parameters<typeof cityStatus>[0];}
 // latest.json first and version.txt last: a reader that sees the new version always finds the new file.
 export async function publishMasterview(db:SupabaseClient){
- const [state,hubs]=await Promise.all([mvState(db),db.from('hubs').select('name,city,active').then(r=>check(r)!)]);
- const latest=buildLatest(state,hubs);if(!latest.updatedAt)throw new HttpError(409,'Masterview no tiene importaciones.',true);
+ const [state,hubs,imports]=await Promise.all([mvState(db),db.from('hubs').select('name,city,active').then(r=>check(r)!),readImports(db)]);
+ const latest=buildLatest(state,hubs,Object.fromEntries(cityStatus(imports).map(c=>[c.city,c.updated_at])));if(!latest.updatedAt)throw new HttpError(409,'Masterview no tiene importaciones.',true);
  check(await db.storage.from('masterview').upload('latest.json',new Blob([JSON.stringify(latest)],{type:'application/json'}),{contentType:'application/json',upsert:true,cacheControl:'60'}));
  check(await db.storage.from('masterview').upload('version.txt',new Blob([latest.updatedAt],{type:'text/plain'}),{contentType:'text/plain',upsert:true,cacheControl:'60'}));
  return {version:latest.version,updatedAt:latest.updatedAt,count:latest.count};

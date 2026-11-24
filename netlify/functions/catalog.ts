@@ -2,7 +2,7 @@ import {z} from 'zod';
 import {randomUUID} from 'node:crypto';
 import {authorize,check,failure,HttpError} from '../../server/auth';
 import {citySlug} from '../../shared/catalog';
-import {latestCsv,readJob,writeJob} from '../../server/masterview';
+import {latestCsv,readImports,readJob,writeJob} from '../../server/masterview';
 import {cityStatus} from '../../shared/masterview';
 import {unmatchedReport} from '../../server/unmatched';
 const STALE_JOB=15*60000;
@@ -22,7 +22,7 @@ export default async function handler(request:Request){try{
  // What the screen polls during an import: one small file, no tables.
  if(b.action==='job')return Response.json({job:await readJob(db)});
  const running=async()=>{const job=await readJob(db);if(job?.state==='running'&&Date.now()-new Date(job.startedAt).getTime()<STALE_JOB)throw new HttpError(409,'Ya hay una importación en curso.');};
- const cities=async()=>cityStatus(check(await db.from('mv_imports').select('uploaded_at,cities:report->cities').order('uploaded_at',{ascending:false})) as any);
+ const cities=async()=>cityStatus(await readImports(db));
  if(b.action==='status'){
  const [list,last,job]=await Promise.all([cities(),db.from('mv_imports').select('id,uploaded_at,uploaded_by,report').order('uploaded_at',{ascending:false}).limit(1).maybeSingle().then(r=>check(r)),readJob(db)]);
  const email=last?.uploaded_by?(await db.auth.admin.getUserById(last.uploaded_by)).data.user?.email??null:null;
