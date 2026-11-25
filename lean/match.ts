@@ -172,12 +172,21 @@ function handwritten(row: TranscribedRow, printed: (number | null)[]): { vals: (
 export function quantity(row: TranscribedRow, cols: string[], item: CatalogItem | null, ignoreHand = false): { q: number | null; basis: string; ok: boolean; note?: string; packs?: boolean } {
   const printed = cols.map((_, i) => num(row.quantities?.[i]));
   const hand = ignoreHand ? null : handwritten(row, printed);
-  const q = fromColumns(row, cols, hand?.vals ?? printed, item);
+  const q = fromColumns(row, cols, hand?.vals ?? printed, item, factorProven(cols, printed, item));
   // A hand-corrected quantity is always read by a person, whatever the conversion says.
   return hand ? { ...q, ok: false, note: q.note ? `${hand.note}; ${q.note}` : hand.note } : q;
 }
 
-function fromColumns(row: TranscribedRow, cols: string[], vals: (number | null)[], item: CatalogItem | null): { q: number | null; basis: string; ok: boolean; note?: string; packs?: boolean } {
+// The row itself prints CAJAS × factor = PIEZAS, so its factor holds even when a hand correction leaves only cajas.
+function factorProven(cols: string[], printed: (number | null)[], item: CatalogItem | null) {
+  const pz = printed[cols.findIndex(isPieceHeader)], cj = printed[cols.findIndex(isCaseHeader)], n = item?.perPurchaseUnit;
+  return pz != null && cj != null && !!n && Math.abs(cj * n - pz) < 1e-6;
+}
+
+// The invoice decides the quantity. Masterview's factor checks it or suggests it, and never multiplies on its own:
+// Unidad de compra is how we buy, which isn't always how the supplier bills (Danone Silk, Caja × 6 but billed by the
+// piece, read as 36 instead of 6 on Nov 25).
+function fromColumns(row: TranscribedRow, cols: string[], vals: (number | null)[], item: CatalogItem | null, proven: boolean): { q: number | null; basis: string; ok: boolean; note?: string; packs?: boolean } {
   const pi = cols.findIndex((h, i) => isPieceHeader(h) && vals[i] != null);
   const ci = cols.findIndex((h, i) => isCaseHeader(h) && vals[i] != null);
   const n = item?.perPurchaseUnit ?? null;
@@ -204,8 +213,8 @@ function fromColumns(row: TranscribedRow, cols: string[], vals: (number | null)[
     : { q: null, basis: `${cols[oi] ?? 'cantidad'} ${v} (elige el producto para convertir)`, ok: false };
   if (!item.purchaseUnit || (itemByCase && !n)) return { q: v, basis: `${cols[oi]} ${v}`, ok: false, note: 'el catálogo no tiene unidad de compra/piezas por caja' };
   if (!itemByCase || n === 1) return { q: v, basis: `${cols[oi]} ${v} (catálogo: 1 ${item.purchaseUnit || 'pieza'} = 1)`, ok: true };
-  if (inCases) return { q: v * n!, basis: `${v} cajas × ${n} pz/caja (catálogo)`, ok: true };
-  if (pieceUnit(row.unit)) return { q: v, basis: `${v} ${row.unit}`, ok: true };
+  if (inCases && proven) return { q: v * n!, basis: `${v} cajas × ${n} pz/caja (impreso en el renglón)`, ok: true };
+  if (!inCases && pieceUnit(row.unit)) return { q: v, basis: `${v} ${row.unit}`, ok: true };
   return { q: v, basis: `${cols[oi]} ${v}`, ok: false, note: `¿${v} piezas o ${v} cajas (= ${v * n!} pz)? El catálogo compra por caja de ${n}` };
 }
 

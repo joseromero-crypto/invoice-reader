@@ -10,7 +10,8 @@ export const rowStatus=(r:Row)=>r.status??(r.flags.length?'review':'ok');
 const validPieces=(s:string)=>/^\d+$/.test(s.trim())&&Number(s)<=1000000;
 const transcribed=(r:Row)=>Array.isArray(r.sourceDetails?.codes)?r.sourceDetails as unknown as TranscribedRow:null;
 // Same rules as lean/match.ts: a different product can change cajas × piezas por caja.
-function piecesFor(r:Row,product:Product|null){const t=transcribed(r);if(!t||!r.columns)return null;return quantity(t,r.columns,product&&toItem(product)).q;}
+function quantityFor(r:Row,product:Product|null){const t=transcribed(r);if(!t||!r.columns)return null;return quantity(t,r.columns,product&&toItem(product));}
+function piecesFor(r:Row,product:Product|null){return quantityFor(r,product)?.q??null;}
 // An N-pack counts as one in Retool: say it next to the number, with the loose pieces muted.
 function PackHint({product,pieces}:{product:Product|null;pieces:string}){const p=packOf(product?.name);if(!p||p.kind!=='pack')return null;const q=/^\d+$/.test(pieces.trim())?Number(pieces):null;
  return <small className="lean-pack">{q===null?`Retool cuenta paquetes de ${p.n}`:<><strong>{q} paquete{q===1?'':'s'}</strong> · {q*p.n} piezas</>}</small>;}
@@ -30,7 +31,9 @@ function ProductPicker({value,candidates,products,disabled,onChange,big=false}:{
 }
 // One line per item: Calii name + pieces are what the receiver checks; the invoice text is a muted hint.
 function LeanRow({row,draft,setDraft,products,disabled,onConfirm}:{row:Row;draft:Draft;setDraft:(d:Draft)=>void;products:Product[];disabled:boolean;onConfirm:()=>void}){
- const status=rowStatus(row),reasons=row.reasons??row.flags;
+ const status=rowStatus(row),saved=row.reasons??row.flags;
+ // A product picked by hand can raise its own question (¿6 piezas o 6 cajas?), which the saved reasons don't have.
+ const asked=!row.confirmed&&draft.product&&draft.product.id!==row.product?.id?quantityFor(row,draft.product)?.note:null,reasons=asked&&!saved.includes(asked)?[...saved,asked]:saved;
  const hint=[row.description,row.supplierSku??row.barcode].filter(Boolean).join(' · ');
  return <li className={`lean-item ${status}${row.confirmed?' confirmed':''}`}>
  <div className="lean-main">{row.confirmed?<strong className="lean-name">{row.product?.name}</strong>:<ProductPicker big value={draft.product} candidates={row.candidates} products={products} disabled={disabled} onChange={p=>{const q=piecesFor(row,p);setDraft({product:p,pieces:q!==null&&Number.isInteger(q)?String(q):draft.pieces});}}/>}

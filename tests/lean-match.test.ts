@@ -78,9 +78,16 @@ describe('lean match', () => {
     expect(r.proposals[1].status).toBe('review'); // 5 × 8 ≠ 38
   });
 
-  it('converts cajas to pieces with the catalog when no piece column exists', () => {
-    const r = match(doc(['CANT.'], [row({ codes: [{ header: 'CLAVE', value: '01152' }], quantities: ['3'], unit: 'CAJAS' })]), catalog);
-    expect(r.proposals[0]).toMatchObject({ quantity: 36, status: 'ok' });
+  it('never multiplies by the catalog factor without proof on the invoice', () => {
+    const t = doc(['CANT.'], [row({ codes: [{ header: 'CLAVE', value: '01152' }], quantities: ['3'], unit: 'CAJAS' })]);
+    for (const mode of ['captura', 'recepcion'] as const) {
+      const p = match(t, catalog, undefined, { mode }).proposals[0];
+      expect(p).toMatchObject({ quantity: 3, quantityOk: false, confident: true, status: 'review' });
+      expect(p.reasons.join()).toContain('¿3 piezas o 3 cajas (= 36 pz)?');
+    }
+    // Danone prints the same number under two CAJAS headers; that proves nothing either.
+    const two = match(doc(['CANTIDAD (CAJAS - ZZ)', 'CANTIDAD (CAJAS - EA)'], [row({ codes: [{ header: 'CLAVE', value: '01152' }], quantities: ['6.00', '6.00'] })]), catalog).proposals[0];
+    expect(two).toMatchObject({ quantity: 6, quantityOk: false, status: 'review' });
   });
 
   it('matches by barcode even when the supplier code changed, and never uses SAT codes', () => {
@@ -268,7 +275,7 @@ describe('lean match', () => {
       const t = { ...doc(['CANT.'], [row({ codes: [{ header: 'CLAVE', value: 'YOBT910' }], description: 'YOGHURT BAT FRESA 900G', quantities: ['2'], unit: 'CAJAS' })]), supplier: 'ALPURA' };
       const saved = new Map([['ALPURA|YOBT910', 'topo']]);
       const captura = match(t, catalog, saved).proposals[0];
-      expect(captura).toMatchObject({ matchedBy: 'mapping', quantity: 24, confident: false });
+      expect(captura).toMatchObject({ matchedBy: 'mapping', quantity: 2, confident: false });
       const p = match(t, catalog, saved, recepcion).proposals[0];
       expect(p).toMatchObject({ item: null, matchedBy: null, confident: false, quantity: null, quantityOk: false, status: 'review' });
       expect(p.candidates[0]).toMatchObject({ id: 'topo', score: 1 });
