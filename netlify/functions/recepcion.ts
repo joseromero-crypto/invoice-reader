@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {failure,HttpError} from '../../server/auth';
-import {corsHeaders,listHub,photos,readSession,start,submit} from '../../server/recepcion';
+import {corsHeaders,listHub,photos,readSession,sinCoincidencia,start,submit} from '../../server/recepcion';
 import {limits} from '../../server/config';
 // For mh-recibo (no user sign-in): start → PUT each photo to its signed URL → submit → poll read. See CLAUDE.md.
 const sessionId=z.string().trim().min(10).max(200).regex(/^[a-z0-9-]+__[^\s]+$/);
@@ -9,6 +9,7 @@ const Input=z.discriminatedUnion('action',[
  z.object({action:z.literal('submit'),sessionId,documentId:z.string().uuid()}),
  z.object({action:z.literal('read'),sessionId}),
  z.object({action:z.literal('photos'),sessionId,readId:z.string().uuid()}),
+ z.object({action:z.literal('sinCoincidencia')}),
  z.object({action:z.literal('list'),hubSlug:z.string().trim().min(1).max(80),since:z.string().datetime({offset:true}).nullable().optional()})]);
 export default async function handler(request:Request){
  const cors=corsHeaders(request.headers.get('origin'));
@@ -22,6 +23,7 @@ export default async function handler(request:Request){
   if(b.action==='submit')return answer(Response.json(await submit(request,b.sessionId,b.documentId),{status:202}));
   if(b.action==='photos')return answer(Response.json(await photos(b.sessionId,b.readId)));
   if(b.action==='read')return answer(Response.json(await readSession(b.sessionId)));
+  if(b.action==='sinCoincidencia')return answer(Response.json(await sinCoincidencia()));
   return answer(Response.json(await listHub(b.hubSlug,b.since??null)));
  }catch(e){return answer(failure(e));}
 }

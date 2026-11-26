@@ -7,6 +7,8 @@ import {adminClient,check,HttpError} from './auth';
 import {limits} from './config';
 import {catalog,cityItems,hubCity} from './workspace';
 import {leanMappings} from './rematch';
+import {unmatchedReport} from './unmatched';
+import {unmatchedJson} from '../lean/unmatched.ts';
 
 // mh-recibo (static page, anon key, no user sign-in) sends reception photos here and reads the result back.
 // Reads made this way run as one service account (RECEPCION_ACTOR_ID: an admin member with no password anyone knows),
@@ -181,4 +183,10 @@ export async function photos(sessionId:string,readId:string){
  if(!pages.length)return {photos:[]};
  const signed=check(await db.storage.from('invoices').createSignedUrls(pages.map(p=>p.object_path),600))!;
  return {photos:pages.map((p,i)=>({page:p.page_number,url:signed[i]?.signedUrl??null})).filter(p=>p.url)};
+}
+
+// «Sin coincidencia» for mh-recibo: the same rows as the Masterview screen's CSV download, read-only.
+export async function sinCoincidencia(){
+ const db=adminClient(),orgId=await actorOrg(db,recepcionActor()),report=await unmatchedReport(db,orgId);
+ return {generado:new Date().toISOString(),rows:unmatchedJson(report.rows)};
 }

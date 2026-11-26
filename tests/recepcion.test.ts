@@ -72,6 +72,8 @@ describe('CORS and worker signature',()=>{
   expect(pre.status).toBe(204);expect(pre.headers.get('access-control-allow-origin')).toBe('https://recibo.example.test');
   const bad=await handler(new Request('https://x.test/.netlify/functions/recepcion',{method:'POST',headers:{origin:'https://recibo.example.test'},body:JSON.stringify({action:'start',sessionId:'x',photoCount:20})}));
   expect(bad.status).toBe(400);expect(bad.headers.get('access-control-allow-origin')).toBe('https://recibo.example.test');
+  const unknown=await handler(new Request('https://x.test/.netlify/functions/recepcion',{method:'POST',headers:{origin:'https://recibo.example.test'},body:JSON.stringify({action:'borrarTodo'})}));
+  expect(unknown.status).toBe(400);
  });
  it('the worker accepts only the signature for that job',()=>{
   process.env.SUPABASE_SECRET_KEY='test-key';

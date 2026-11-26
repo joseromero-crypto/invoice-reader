@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { strFromU8, unzipSync } from 'fflate';
-import { UNMATCHED_SHEET, unmatched, unmatchedCsv, unmatchedTable, type SavedRead } from '../lean/unmatched.ts';
+import { UNMATCHED_SHEET, unmatched, unmatchedCsv, unmatchedJson, unmatchedTable, type SavedRead } from '../lean/unmatched.ts';
 import { xlsx } from '../src/lib/xlsx.ts';
 import type { CatalogItem } from '../lean/match.ts';
 import type { TranscribedRow } from '../lean/transcribe.ts';
@@ -68,4 +68,13 @@ describe('unmatched report', () => {
     expect(body).toContain('A &amp; B &lt;C&gt;');
     expect(body).toMatch(/<c r="G2"><v>1<\/v><\/c>/); // Facturas is a real number, so it can be summed
   });
+
+  it('gives mh-recibo the same rows as the CSV, as JSON', () => {
+    const rows = report([read('B', [row('*796', 'CIEL')], { hub: 'MH Contry', at: '2026-11-23T18:00:00Z' }), read('A', [row('*796', 'CIEL'), row('LEUP441', 'LECHE PQ')])], new Map([['Alpura|LEUP441', 'p']]));
+    const json = unmatchedJson(rows), table = unmatchedTable(rows).slice(1);
+    expect(json).toHaveLength(table.length);
+    expect(json.find(r => r.clave === '*796')).toEqual({ proveedor: 'Alpura', ciudad: 'Monterrey', clave: '*796', codigo_barras: '', descripcion: 'CIEL', motivo: rows.find(r => r.code === '*796')!.reason, facturas: 2, ultima_vez: '2026-11-23', hubs: ['MH Contry', 'MH Cumbres'], articulo_recibo: '', sku_recibo: '', sugerencia: expect.any(String), sku_sugerido: expect.any(String) });
+    expect(json.find(r => r.clave === 'LEUP441')).toMatchObject({ articulo_recibo: 'Leche entera Alpura 1L (4 Pack)', sku_recibo: 'PACK4', facturas: 1 });
+  });
 });
+

@@ -59,3 +59,12 @@ export const UNMATCHED_SHEET = { sheet: 'Sin coincidencia', widths: [20, 12, 16,
 export function unmatchedCsv(rows: UnmatchedRow[]) {
   return '\uFEFF' + unmatchedTable(rows).map(line => line.map(csvCell).join(',')).join('\r\n');
 }
+// The same rows for mh-recibo (recepcion action sinCoincidencia), built from the CSV table so the two can't drift.
+export const UNMATCHED_FIELDS = ['proveedor', 'ciudad', 'clave', 'codigo_barras', 'descripcion', 'motivo', 'facturas', 'ultima_vez', 'hubs', 'articulo_recibo', 'sku_recibo', 'sugerencia', 'sku_sugerido'] as const;
+export function unmatchedJson(rows: UnmatchedRow[]) {
+  return unmatchedTable(rows).slice(1).map((line, i) => {
+    const out: Record<string, string | number | string[]> = Object.fromEntries(UNMATCHED_FIELDS.map((f, n) => [f, line[n]]));
+    out.facturas = rows[i].invoices; out.hubs = [...rows[i].hubs];
+    return out;
+  });
+}
