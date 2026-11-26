@@ -117,3 +117,10 @@ it('keeps only the whitelist, and match() still gets every column it reads',()=>
  expect(JSON.stringify({...r.productRaw,...r.cityRaw})).not.toContain('99');
  expect(asCatalogItem({id:'uuid',sku:r.sku,raw:r.productRaw,city_row:{name:r.name,raw:r.cityRaw}})).toEqual({id:'uuid',name:'Item uno',sku:'SKU1',supplier:'LALA',supplierSku:'21541',barcodes:[],purchaseUnit:'Caja',perPurchaseUnit:12,purchasingOff:true});
 });
+it('skuByName gives the SKU for every name key, also products with no barcode or image, same winner as map',()=>{
+ const plan=planImport([file([row(1,'BGH760','Costilla de cerdo Kowi 500g','Monterrey',''),row(2,'NOIMG','Roll francés Nūbe 84g','Monterrey','','')]),file([row(3,'B','Costilla de cerdo Kowi 500g','CDMX','999')])],empty);
+ const latest=buildLatest(after(empty,plan),[]);
+ expect(latest.skuByName['costilla de cerdo kowi 500g']).toBe('BGH760');expect(latest.map['costilla de cerdo kowi 500g']).toBe('https://img/BGH760');
+ expect(latest.skuByName['roll frances nube 84g']).toBe('NOIMG');expect(latest.map['roll frances nube 84g']).toBeUndefined();
+ for(const [k,v] of Object.entries(latest.map))if(typeof v==='string')expect(latest.skuByName[k]).toBeDefined();
+});

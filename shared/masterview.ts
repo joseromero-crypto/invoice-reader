@@ -81,9 +81,12 @@ export function buildLatest(state:MvState,hubs:{name:string;city:string|null;act
   if(other.length)alt[key]=other;
  }
  // Rows are in city order, so on a name clash the Monterrey name is the one that stays.
- for(const r of rows){const key=normName(r.name),url=products.get(r.sku)!.image_url;if(key&&url&&!(key in map))map[key]=url;}
+ // skuByName: same name keys, for every product (with or without image or barcode); where map has the name, the same product.
+ const skuByName:Record<string,string>={};
+ for(const r of rows){const key=normName(r.name),url=products.get(r.sku)!.image_url;if(key&&url&&!(key in map)){map[key]=url;skuByName[key]=r.sku;}}
+ for(const r of rows){const key=normName(r.name);if(key&&!(key in skuByName))skuByName[key]=r.sku;}
  const uploadedAt=new Map((state.imports??[]).map(i=>[i.id,i.uploaded_at])),cityUpdatedAt:Record<string,string>={};
  for(const r of rows){const at=uploadedAt.get(r.import_id??'');if(at&&(!cityUpdatedAt[r.city]||at>cityUpdatedAt[r.city]))cityUpdatedAt[r.city]=at;}
  const updatedAt=(state.imports??[]).find(i=>i.id===state.version)?.uploaded_at??null;
- return {updatedAt,version:state.version,count:products.size,cities:[...new Set(rows.map(r=>r.city))],cityUpdatedAt:{...cityUpdatedAt,...cityTimes},hubCities:Object.fromEntries(hubs.filter(h=>h.active&&h.city).map(h=>[citySlug(h.name),h.city])),map,alt};
+ return {updatedAt,version:state.version,count:products.size,cities:[...new Set(rows.map(r=>r.city))],cityUpdatedAt:{...cityUpdatedAt,...cityTimes},hubCities:Object.fromEntries(hubs.filter(h=>h.active&&h.city).map(h=>[citySlug(h.name),h.city])),map,alt,skuByName};
 }
